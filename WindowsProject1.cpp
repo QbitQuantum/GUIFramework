@@ -1,6 +1,15 @@
 ﻿// ============================================================================
 //  vcl_win.cpp — минимальный VCL-подобный GUI-фреймворк + Windows-драйвер
 //  C++17. Контролы — нативные HWND, но за абстракцией IOSDriver / TControl.
+//
+//  ИЗМЕНЕНИЯ:
+//   * TOSControl владеет окном через unique_ptr<IOSHandle>.
+//   * ~TOSControl делает FHandle.reset() в теле деструктора — пока this валиден,
+//     чтобы ~Win (и DestroyWindow внутри) отработал до разрушения подобъектов.
+//   * Win — владелец sink и hwnd. ~Win сам обнуляет sink (владелец поля —
+//     владелец и обнуляет) и через unique_hwnd вызывает DestroyWindow.
+//   * DestroyHandle / DestroyControl / DestroyWin — удалены.
+//   * WM_NCDESTROY чистит GWLP_USERDATA и FByHwnd, но Win НЕ удаляет.
 // ============================================================================
 #pragma once
 
@@ -232,6 +241,9 @@ namespace vcl {
 
     // ============================================================================
     //  IOSDriver
+    //
+    //  DestroyControl больше нет: Win умирает через unique_ptr<IOSHandle>
+    //  у владельца (TOSControl). Драйвер не управляет временем жизни Win.
     // ============================================================================
     class IOSDriver {
     public:
@@ -245,7 +257,6 @@ namespace vcl {
         virtual void Quit() = 0;
 
         virtual IOSHandle* CreateControl(const ControlDesc& d) = 0;
-        virtual void       DestroyControl(IOSHandle* h) = 0;
 
         virtual void SetBounds(IOSHandle* h, int l, int t, int w, int ht) = 0;
         virtual void SetVisible(IOSHandle* h, bool v) = 0;
@@ -435,34 +446,31 @@ namespace vcl {
 
     // ============================================================================
     //  TOSControl — TControl с HWND.
+    //
+    //  FHandle — unique_ptr<IOSHandle>. Владение окном — здесь.
+    //  ~TOSControl: FHandle.reset() в ТЕЛЕ деструктора, пока this ещё валиден.
+    //  Это гарантирует, что ~Win отработает до разрушения подобъектов TControl,
+    //  и DestroyWindow внутри ~Win не «выстрелит» в полуразрушенный объект.
     // ============================================================================
     class TOSControl : public TControl, public IEventSink {
     protected:
-        IOSHandle* FHandle = nullptr;
+        std::unique_ptr<IOSHandle> FHandle;
         IOSDriver* FDriver = nullptr;
         int        FId = 0;
-    private:
-        void DestroyHandle() {
-            if (FHandle && FDriver) {
-                FDriver->SetEventSink(FHandle, nullptr);
-                FDriver->DestroyControl(FHandle);
-            }
-            delete FHandle;
-            FHandle = nullptr;
-        }
-    public:
 
+    public:
         TOSControl() = default;
 
         ~TOSControl() override {
-            DestroyHandle();
+            // Тело деструктора: this ещё валиден, подобъекты целы.
+            // reset() уничтожит Win ЗДЕСЬ — ~Win сделает sink=nullptr и DestroyWindow.
         }
 
         bool CreateHandlesRecursive(IOSHandle* parentHandle) {
             if (!CreateHandle(parentHandle)) return false;
             for (auto* c : FChildControls) {
                 if (auto* os = dynamic_cast<TOSControl*>(c)) {
-                    if (!os->CreateHandlesRecursive(FHandle)) return false;
+                    if (!os->CreateHandlesRecursive(FHandle.get())) return false;
                 }
             }
             return true;
@@ -474,7 +482,7 @@ namespace vcl {
         IOSDriver* Driver() const { return FDriver; }
 
         // Пока не тащим если не требуется
-        // IOSHandle* Handle() const { return FHandle; }
+        // IOSHandle* Handle() const { return FHandle.get(); }
 
         // Создать HWND себя. parentHandle == nullptr — top-level,
         // иначе — дочернее окно относительно указанного родителя.
@@ -491,13 +499,13 @@ namespace vcl {
             d.id = FId;
             d.parent = parentHandle;
 
-            FHandle = FDriver->CreateControl(d);
+            FHandle.reset(FDriver->CreateControl(d));
             if (!FHandle) return false;
 
-            FDriver->SetEventSink(FHandle, this);
-            FDriver->SetText(FHandle, FCaption);
-            FDriver->SetVisible(FHandle, FVisible);
-            FDriver->SetEnabled(FHandle, FEnabled);
+            FDriver->SetEventSink(FHandle.get(), this);
+            FDriver->SetText(FHandle.get(), FCaption);
+            FDriver->SetVisible(FHandle.get(), FVisible);
+            FDriver->SetEnabled(FHandle.get(), FEnabled);
             return true;
         }
 
@@ -515,22 +523,22 @@ namespace vcl {
         // FHandle != nullptr ⇒ FDriver != nullptr.
         void SetBounds(int l, int t, int w, int h) override {
             TControl::SetBounds(l, t, w, h);
-            if (FHandle) FDriver->SetBounds(FHandle, l, t, w, h);
+            if (FHandle) FDriver->SetBounds(FHandle.get(), l, t, w, h);
         }
         void SetVisible(bool v) override {
             TControl::SetVisible(v);
-            if (FHandle) FDriver->SetVisible(FHandle, v);
+            if (FHandle) FDriver->SetVisible(FHandle.get(), v);
         }
         void SetCaption(const std::string& c) override {
             TControl::SetCaption(c);
-            if (FHandle) FDriver->SetText(FHandle, c);
+            if (FHandle) FDriver->SetText(FHandle.get(), c);
         }
         void SetEnabled(bool e) override {
             TControl::SetEnabled(e);
-            if (FHandle) FDriver->SetEnabled(FHandle, e);
+            if (FHandle) FDriver->SetEnabled(FHandle.get(), e);
         }
         void Invalidate() override {
-            if (FHandle) FDriver->Invalidate(FHandle);
+            if (FHandle) FDriver->Invalidate(FHandle.get());
             TControl::Invalidate();
         }
 
@@ -583,7 +591,7 @@ namespace vcl {
 
         void DoPaint(HDC dcFromPaint = nullptr) {
             if (!FDriver || !FHandle) return;
-            auto canvas = FDriver->CreateCanvas(FHandle, dcFromPaint);
+            auto canvas = FDriver->CreateCanvas(FHandle.get(), dcFromPaint);
             if (canvas) PaintTree(*canvas);
         }
 
@@ -624,7 +632,7 @@ namespace vcl {
 
 
         bool CreateFormHandlesRecursive() {
-            return CreateHandlesRecursive(FHandle);
+            return CreateHandlesRecursive(FHandle.get());
         }
 
         void Show() { if (!FClosed) SetVisible(true); }
@@ -769,11 +777,11 @@ namespace vcl {
 
         void SetChecked(bool c) {
             FUpdating = true;
-            if (FHandle) FDriver->SetCheck(FHandle, c);
+            if (FHandle) FDriver->SetCheck(FHandle.get(), c);
             FUpdating = false;
         }
         bool Checked() const {
-            return FHandle ? FDriver->GetCheck(FHandle) : false;
+            return FHandle ? FDriver->GetCheck(FHandle.get()) : false;
         }
 
         const char* ClassName() const override { return "TCheckBox"; }
@@ -790,11 +798,11 @@ namespace vcl {
         ControlKind Kind() const override { return ControlKind::Edit; }
 
         std::string Text() const {
-            return FHandle ? FDriver->GetText(FHandle) : std::string{};
+            return FHandle ? FDriver->GetText(FHandle.get()) : std::string{};
         }
         void SetText(const std::string& s) {
             FUpdating = true;
-            if (FHandle) FDriver->SetText(FHandle, s);
+            if (FHandle) FDriver->SetText(FHandle.get(), s);
             FUpdating = false;
         }
 
@@ -813,23 +821,23 @@ namespace vcl {
         ControlKind Kind() const override { return ControlKind::ComboBox; }
 
         void AddItem(const std::string& s) {
-            if (FHandle) FDriver->AddString(FHandle, s);
+            if (FHandle) FDriver->AddString(FHandle.get(), s);
             else FPending.push_back(s);
         }
         int  SelectedIndex() const {
-            return FHandle ? FDriver->GetSel(FHandle) : -1;
+            return FHandle ? FDriver->GetSel(FHandle.get()) : -1;
         }
         void SetSelectedIndex(int i) {
             FUpdating = true;
-            if (FHandle) FDriver->SetSel(FHandle, i);
+            if (FHandle) FDriver->SetSel(FHandle.get(), i);
             FUpdating = false;
         }
 
         bool CreateHandle(IOSHandle* parentHandle) override {
             if (!TOSControl::CreateHandle(parentHandle)) return false;
             FUpdating = true;
-            for (auto& s : FPending) FDriver->AddString(FHandle, s);
-            if (!FPending.empty()) FDriver->SetSel(FHandle, 0);
+            for (auto& s : FPending) FDriver->AddString(FHandle.get(), s);
+            if (!FPending.empty()) FDriver->SetSel(FHandle.get(), 0);
             FUpdating = false;
             FPending.clear();
             return true;
@@ -925,6 +933,14 @@ namespace vcl {
     class ITWindowsDriver {
     public:
         // ---- Служебная структура окна ----------------------------------------
+        //
+        //  Win — владелец sink и hwnd.
+        //  ~Win — единственная точка, где Win рвёт свои связи:
+        //    * sink = nullptr  (владелец поля обнуляет поле)
+        //    * hwnd уникальный  (unique_hwnd сам вызовет DestroyWindow)
+        //  Порядок: sink = nullptr ДО разрушения hwnd → WM_* от DestroyWindow
+        //  прилетят в WndProc, увидят sink == nullptr и ничего не сделают.
+        // ------------------------------------------------------------------------
         struct Win : IOSHandle {
             wil::unique_hwnd hwnd;
             IEventSink* sink = nullptr;
@@ -932,9 +948,19 @@ namespace vcl {
             ControlKind      kind = ControlKind::Panel;
             int              id = 0;
             bool             isForm = false;
+
+            ~Win() override {
+                // Владелец поля обнуляет поле.
+                // WM_* от DestroyWindow (ниже, в ~unique_hwnd) увидят sink == nullptr.
+                sink = nullptr;
+                // hwnd разрушится автоматически: unique_hwnd вызовет DestroyWindow.
+                // WM_NCDESTROY почистит GWLP_USERDATA и FByHwnd.
+            }
         };
 
         // ---- Хранилище окон ---------------------------------------------------
+        //  Владеет Win-обёртками НЕ драйвер — их владелец TOSControl
+        //  (unique_ptr<IOSHandle>). Здесь карта для маршрутизации WndProc.
         std::map<HWND, Win*> FByHwnd;
         HINSTANCE            FInst = nullptr;
         HINSTANCE            FHInst = nullptr;
@@ -1012,16 +1038,6 @@ namespace vcl {
             SetWindowLongPtrW(win->hwnd.get(), GWLP_USERDATA, (LONG_PTR)win);
             FByHwnd[win->hwnd.get()] = win;
             return win;
-        }
-
-        void DestroyWin(Win* w) {
-            if (!w) return;
-            HWND raw = w->hwnd.get();
-            if (raw) {
-                SetWindowLongPtrW(raw, GWLP_USERDATA, 0);
-                FByHwnd.erase(raw);
-            }
-            w->hwnd.reset();
         }
 
         // =======================================================================
@@ -1120,6 +1136,16 @@ namespace vcl {
                 }
                 return 0;
 
+            case WM_NCDESTROY:
+                // Последнее сообщение окна. Чистим карты, но Win НЕ удаляем —
+                // им владеет TOSControl через unique_ptr<IOSHandle>.
+                if (w) {
+                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                    drv->FByHwnd.erase(hwnd);
+                    w->hwnd.release();   // HWND уже мёртв
+                }
+                return DefWindowProcW(hwnd, msg, wp, lp);
+
             case WM_SIZE:
                 drv->OnSize(hwnd, w, LOWORD(lp), HIWORD(lp));
                 return 0;
@@ -1179,7 +1205,10 @@ namespace vcl {
             singleton_windows_driver = nullptr;
         }
 
-        // ---- IOSDriver: создание / уничтожение контролов ---------------------
+        // ---- IOSDriver: создание контролов -----------------------------------
+        //
+        //  DestroyControl убран: Win удаляется через unique_ptr<IOSHandle>
+        //  у владельца TOSControl. Драйвер лишь предоставляет операции над окном.
         IOSHandle* CreateControl(const ControlDesc& d) override {
             HWND parent = d.parent
                 ? static_cast<Win*>(d.parent)->hwnd.get()
@@ -1242,10 +1271,6 @@ namespace vcl {
                 ctrlId = (d.id ? d.id : FNextId++);
 
             return CreateWin(d, cls, style, exStyle, parent, x, y, ww, hh, ctrlId);
-        }
-
-        void DestroyControl(IOSHandle* h) override {
-            DestroyWin(static_cast<Win*>(h));
         }
 
         // ---- IOSDriver: операции над окном -----------------------------------
