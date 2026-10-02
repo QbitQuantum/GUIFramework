@@ -1204,16 +1204,8 @@ namespace vcl {
         void SetBounds(IOSHandle* h, int l, int t, int w, int ht) override {
             auto* win = static_cast<Win*>(h);
             if (!win || !win->hwnd) return;
-            if (win->kind == ControlKind::Form) {
-                RECT r{ 0, 0, w, ht };
-                AdjustWindowRectEx(&r, WS_OVERLAPPEDWINDOW, FALSE, 0);
-                ::SetWindowPos(win->hwnd.get(), nullptr, l, t, r.right - r.left, r.bottom - r.top,
-                    SWP_NOZORDER | SWP_NOACTIVATE);
-            }
-            else {
-                ::SetWindowPos(win->hwnd.get(), nullptr, l, t, w, ht,
-                    SWP_NOZORDER | SWP_NOACTIVATE);
-            }
+            ::SetWindowPos(win->hwnd.get(), nullptr, l, t, w, ht,
+                SWP_NOZORDER | SWP_NOACTIVATE);
         }
 
         void SetVisible(IOSHandle* h, bool v) override {
@@ -1224,8 +1216,8 @@ namespace vcl {
 
         void SetText(IOSHandle* h, const std::string& text) override {
             auto* win = static_cast<Win*>(h);
-            if (win && win->hwnd)
-                ::SetWindowTextW(win->hwnd.get(), Utf8ToW(text).c_str());
+            if (!win || !win->hwnd) return;
+            ::SetWindowTextW(win->hwnd.get(), Utf8ToW(text).c_str());
         }
 
         std::string GetText(IOSHandle* h) const override {
@@ -1241,45 +1233,46 @@ namespace vcl {
 
         void SetEnabled(IOSHandle* h, bool e) override {
             auto* win = static_cast<Win*>(h);
-            if (win && win->hwnd) ::EnableWindow(win->hwnd.get(), e ? TRUE : FALSE);
+            if (!win || !win->hwnd) return;
+            ::EnableWindow(win->hwnd.get(), e ? TRUE : FALSE);
         }
 
         void Invalidate(IOSHandle* h) override {
-            auto* w = static_cast<Win*>(h);
-            if (w && w->hwnd) ::InvalidateRect(w->hwnd.get(), nullptr, TRUE);
+            auto* win = static_cast<Win*>(h);
+            if (!win || !win->hwnd) return;
+            ::InvalidateRect(win->hwnd.get(), nullptr, TRUE);
         }
 
         void SetCheck(IOSHandle* h, bool c) override {
             auto* win = static_cast<Win*>(h);
-            if (win && win->hwnd)
-                SendMessageW(win->hwnd.get(), BM_SETCHECK,
-                    c ? BST_CHECKED : BST_UNCHECKED, 0);
+            if (!win || !win->hwnd) return;
+            SendMessageW(win->hwnd.get(), BM_SETCHECK,
+                c ? BST_CHECKED : BST_UNCHECKED, 0);
         }
 
         bool GetCheck(IOSHandle* h) const override {
             auto* win = static_cast<Win*>(h);
-            return win && win->hwnd &&
-                SendMessageW(win->hwnd.get(), BM_GETCHECK, 0, 0) == BST_CHECKED;
+            if (!win || !win->hwnd) return false;
+            return SendMessageW(win->hwnd.get(), BM_GETCHECK, 0, 0) == BST_CHECKED;
         }
 
         void AddString(IOSHandle* h, const std::string& s) override {
             auto* win = static_cast<Win*>(h);
-            if (win && win->hwnd) {
-                std::wstring ws = Utf8ToW(s);
-                SendMessageW(win->hwnd.get(), CB_ADDSTRING, 0, (LPARAM)ws.c_str());
-            }
+            if (!win || !win->hwnd) return;
+            std::wstring ws = Utf8ToW(s);
+            SendMessageW(win->hwnd.get(), CB_ADDSTRING, 0, (LPARAM)ws.c_str());
         }
 
         void SetSel(IOSHandle* h, int idx) override {
             auto* win = static_cast<Win*>(h);
-            if (win && win->hwnd)
-                SendMessageW(win->hwnd.get(), CB_SETCURSEL, idx, 0);
+            if (!win || !win->hwnd) return;
+            SendMessageW(win->hwnd.get(), CB_SETCURSEL, idx, 0);
         }
 
         int GetSel(IOSHandle* h) const override {
             auto* win = static_cast<Win*>(h);
-            return (win && win->hwnd)
-                ? (int)SendMessageW(win->hwnd.get(), CB_GETCURSEL, 0, 0) : -1;
+            if (!win || !win->hwnd) return -1;
+            return (int)SendMessageW(win->hwnd.get(), CB_GETCURSEL, 0, 0);
         }
 
         void SetEventSink(IOSHandle* h, IEventSink* sink) override {
@@ -1353,86 +1346,73 @@ namespace vcl {
             }
         }
 
-        bool OnEraseBackground(HWND hwnd, Win* w, HDC dc) override {
-            if (w && (w->kind == ControlKind::Panel ||
-                w->kind == ControlKind::Form)) {
-                RECT rc; GetClientRect(hwnd, &rc);
-                wil::unique_hbrush br(
-                    CreateSolidBrush(GetSysColor(COLOR_BTNFACE)));
-                ::FillRect(dc, &rc, br.get());
-                return true;
-            }
-            return false;
+        template <class F>
+        static void Emit(Win* w, OSEvent::Type type, F&& setup) {
+            if (!w || !w->sink) return;
+            OSEvent e;
+            e.type = type;
+            setup(e);
+            w->sink->OnOSEvent(e);
         }
 
-        void OnShowWindow(HWND, Win* w, BOOL shown) override {
-            if (w && w->sink) {
-                OSEvent e;
-                e.type = shown ? OSEvent::Show : OSEvent::Hide;
-                w->sink->OnOSEvent(e);
+        bool OnEraseBackground(HWND hwnd, Win* w, HDC dc) override {
+            if (!w || (w->kind != ControlKind::Panel &&
+                w->kind != ControlKind::Form)) {
+                return false;
             }
+
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            wil::unique_hbrush br(
+                CreateSolidBrush(GetSysColor(COLOR_BTNFACE)));
+            ::FillRect(dc, &rc, br.get());
+            return true;
         }
 
         bool OnClose(HWND, Win* w) override {
             if (!w || !w->sink) return false;
-            OSEvent e; e.type = OSEvent::Close;
+            OSEvent e;
+            e.type = OSEvent::Close;
             e.cancel = false;
             w->sink->OnOSEvent(e);
             return e.cancel;
         }
 
+        void OnShowWindow(HWND, Win* w, BOOL shown) override {
+            Emit(w, shown ? OSEvent::Show : OSEvent::Hide, [](OSEvent&) {});
+        }
+
         void OnSize(HWND, Win* w, int width, int height) override {
-            if (w && w->sink) {
-                OSEvent e; e.type = OSEvent::Resize;
-                e.width = width; e.height = height;
-                w->sink->OnOSEvent(e);
-            }
+            Emit(w, OSEvent::Resize, [=](OSEvent& e) {
+                e.width = width; e.height = height; });
         }
 
         void OnMove(HWND, Win* w, int x, int y) override {
-            if (w && w->sink) {
-                OSEvent e; e.type = OSEvent::Move;
-                e.x = x; e.y = y;
-                w->sink->OnOSEvent(e);
-            }
+            Emit(w, OSEvent::Move, [=](OSEvent& e) {
+                e.x = x; e.y = y; });
         }
 
         void OnMouseDown(HWND, Win* w, int x, int y, int button) override {
-            if (w && w->sink) {
-                OSEvent e; e.type = OSEvent::MouseDown;
-                e.x = x; e.y = y; e.button = button;
-                w->sink->OnOSEvent(e);
-            }
+            Emit(w, OSEvent::MouseDown, [=](OSEvent& e) {
+                e.x = x; e.y = y; e.button = button; });
         }
 
         void OnMouseUp(HWND, Win* w, int x, int y, int button) override {
-            if (w && w->sink) {
-                OSEvent e; e.type = OSEvent::MouseUp;
-                e.x = x; e.y = y; e.button = button;
-                w->sink->OnOSEvent(e);
-            }
+            Emit(w, OSEvent::MouseUp, [=](OSEvent& e) {
+                e.x = x; e.y = y; e.button = button; });
         }
 
         void OnMouseMove(HWND, Win* w, int x, int y) override {
-            if (w && w->sink) {
-                OSEvent e; e.type = OSEvent::MouseMove;
-                e.x = x; e.y = y;
-                w->sink->OnOSEvent(e);
-            }
+            Emit(w, OSEvent::MouseMove, [=](OSEvent& e) {
+                e.x = x; e.y = y; });
         }
 
         void OnKeyDown(HWND, Win* w, int vk) override {
-            if (w && w->sink) {
-                OSEvent e; e.type = OSEvent::KeyDown; e.key = vk;
-                w->sink->OnOSEvent(e);
-            }
+            Emit(w, OSEvent::KeyDown, [=](OSEvent& e) { e.key = vk; });
         }
 
         void OnKeyUp(HWND, Win* w, int vk) override {
-            if (w && w->sink) {
-                OSEvent e; e.type = OSEvent::KeyUp; e.key = vk;
-                w->sink->OnOSEvent(e);
-            }
+            Emit(w, OSEvent::KeyUp, [=](OSEvent& e) { e.key = vk; });
         }
     };
 
