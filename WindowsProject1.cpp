@@ -2,14 +2,16 @@
 //  vcl_win.cpp — минимальный VCL-подобный GUI-фреймворк + Windows-драйвер
 //  C++17. Контролы — нативные HWND, но за абстракцией IOSDriver / TControl.
 //
-//  ИЗМЕНЕНИЯ:
-//   * TOSControl владеет окном через unique_ptr<IOSHandle>.
-//   * ~TOSControl делает FHandle.reset() в теле деструктора — пока this валиден,
-//     чтобы ~Win (и DestroyWindow внутри) отработал до разрушения подобъектов.
-//   * Win — владелец sink и hwnd. ~Win сам обнуляет sink (владелец поля —
-//     владелец и обнуляет) и через unique_hwnd вызывает DestroyWindow.
-//   * DestroyHandle / DestroyControl / DestroyWin — удалены.
-//   * WM_NCDESTROY чистит GWLP_USERDATA и FByHwnd, но Win НЕ удаляет.
+//  КОНТРАКТ ВЛАДЕНИЯ (C++-объекты):
+//   1. TComponent владеет детьми через FOwnedComponents (vector<unique_ptr>).
+//   2. Владение передаётся В КОНСТРУКТОРЕ: TComponent(TComponent* owner).
+//   3. Ребёнок удаляется ТОЛЬКО через деструктор owner-а.
+//   4. Удалять ребёнка в обход owner-а (delete, .reset(), ...) ЗАПРЕЩЕНО.
+//      Нарушение — UB, и это баг того, кто нарушил.
+//   5. FOwner — только для чтения (Owner()). Не использовать для удаления.
+//   6. SetParent(TControl*) — визуальная иерархия, отдельно от владения.
+//   7. RemoveComponent нет. Отцепления в ~TComponent нет. Дети удаляются
+//      автоматически при разрушении FOwnedComponents.
 // ============================================================================
 #pragma once
 
@@ -38,6 +40,30 @@
 #include <sstream>
 
 // ============================================================================
+//  INHERITED(Base) — псевдоним базового класса внутри текущего.
+//
+//  Переключатель VCL_USE_TYPEDEF_INHERITED:
+//    1 — typedef Base inherited;   (стиль C++ Builder / VCL)
+//    0 — using inherited = Base;   (современный C++)
+//
+//  Использование:
+//      class TControl : public TComponent {
+//          INHERITED(TComponent);
+//          ...
+//      };
+//
+//  Тогда в методах:
+//      inherited::SetBounds(...);   // = TComponent::SetBounds(...)
+// ============================================================================
+#define VCL_USE_TYPEDEF_INHERITED 1
+
+#if VCL_USE_TYPEDEF_INHERITED
+#  define INHERITED(Base) typedef Base inherited;
+#else
+#  define INHERITED(Base) using inherited = Base;
+#endif
+
+// ============================================================================
 //  vcl namespace
 // ============================================================================
 namespace vcl {
@@ -60,6 +86,11 @@ namespace vcl {
         WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(),
             &s[0], n, nullptr, nullptr);
         return s;
+    }
+
+    void ShowMessage(const wchar_t* msg)
+    {
+        MessageBoxW(nullptr, msg, L"Ошибка", MB_ICONERROR);
     }
 
     // ============================================================================
@@ -86,54 +117,38 @@ namespace vcl {
     //  TComponent — источник истины по ВЛАДЕНИЮ.
     // ============================================================================
     class TComponent : public TObject {
+        INHERITED(TObject);
     public:
         using TComponentList = std::vector<std::unique_ptr<TComponent>>;
 
     protected:
-        TComponent* FOwner = nullptr;
-        TComponentList  FOwnedComponents;
+        TComponent* FOwner = nullptr;   // только для чтения
+        TComponentList  FOwnedComponents;   // владеет детьми
         std::string     FName;
 
-    public:
-        TComponent() = default;
+        // Принять this во владение. Вызывается ТОЛЬКО из конструктора
+        // TComponent(TComponent*). Наружу не торчит.
+        void AdoptThis(TComponent* c) {
+            if (!c) return;
+            c->FOwner = this;
+            FOwnedComponents.emplace_back(c);
+        }
 
-        // ВНИМАНИЕ: Если передан owner, объект СРАЗУ переходит во владение вектору FOwnedComponents.
-        // Вызывать delete для такого объекта вручную ЗАПРЕЩЕНО. Его удалит owner.
+    public:
+
+        // Владение — здесь. Owner забирает unique_ptr(this).
         explicit TComponent(TComponent* owner) : FOwner(owner) {
             if (owner) {
-                owner->InsertComponent(this);
+                owner->AdoptThis(this);
             }
         }
 
-        ~TComponent() override {
-            // Защита от рекурсии: сначала зануляем owner, чтобы дочерние элементы
-            // при своем уничтожении не пытались вызвать RemoveComponent у умирающего владельца.
-            FOwner = nullptr;
+        ~TComponent() override = default;
 
-            // Очистка дочерних компонентов произойдет автоматически при уничтожении вектора FOwnedComponents
-        }
+        TComponent(const TComponent&) = delete;
+        TComponent& operator=(const TComponent&) = delete;
 
-        void InsertComponent(TComponent* c) {
-            if (!c) return;
-
-            // Корректный поиск сырого указателя внутри unique_ptr
-            auto it = std::find_if(FOwnedComponents.begin(), FOwnedComponents.end(),
-                [c](const std::unique_ptr<TComponent>& ptr) { return ptr.get() == c; });
-
-            if (it == FOwnedComponents.end()) {
-                // Вектор захватывает владение сырым указателем
-                FOwnedComponents.push_back(std::unique_ptr<TComponent>(c));
-            }
-        }
-
-        void RemoveComponent(TComponent* c) {
-            if (!c) return;
-
-            // Исправленный поиск и удаление unique_ptr по сырому указателю
-            auto it = std::find_if(FOwnedComponents.begin(), FOwnedComponents.end(),
-                [c](const std::unique_ptr<TComponent>& ptr) { return ptr.get() == c; });
-            if (it != FOwnedComponents.end()) { FOwnedComponents.erase(it); }
-        }
+        TComponent* Owner() const { return FOwner; }
 
         const std::string& Name() const { return FName; }
         void SetName(const std::string& n) { FName = n; }
@@ -148,7 +163,7 @@ namespace vcl {
 
         const char* ClassName() const override { return "TComponent"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TComponent" || TObject::InheritsFrom(cls);
+            return std::string(cls) == "TComponent" || inherited::InheritsFrom(cls);
         }
     };
 
@@ -205,7 +220,6 @@ namespace vcl {
         int      width = 0, height = 0;
         uint32_t timestamp = 0;
 
-        // Sink может выставить true, чтобы отменить операцию (сейчас — Close).
         bool     cancel = false;
     };
 
@@ -241,9 +255,6 @@ namespace vcl {
 
     // ============================================================================
     //  IOSDriver
-    //
-    //  DestroyControl больше нет: Win умирает через unique_ptr<IOSHandle>
-    //  у владельца (TOSControl). Драйвер не управляет временем жизни Win.
     // ============================================================================
     class IOSDriver {
     public:
@@ -332,9 +343,10 @@ namespace vcl {
     }
 
     // ============================================================================
-    //  TControl — ВИЗУАЛЬНАЯ иерархия (parent/children).
+    //  TControl — ВИЗУАЛЬНАЯ иерархия. Владение — в TComponent.
     // ============================================================================
     class TControl : public TComponent {
+        INHERITED(TComponent);
     protected:
         int  FLeft = 0, FTop = 0;
         int  FWidth = 0, FHeight = 0;
@@ -342,8 +354,8 @@ namespace vcl {
         bool FEnabled = true;
         std::string FCaption;
 
-        TControl* FParent = nullptr;
-        std::vector<TControl*> FChildControls;
+        TControl* FParent = nullptr;              // визуальный, НЕ владеет
+        std::vector<TControl*> FChildControls;    // визуальные дети, НЕ владеет
 
         TNotifyEvent FOnClick;
         TNotifyEvent FOnChange;
@@ -352,20 +364,15 @@ namespace vcl {
         TMouseEvent  FOnMouseMove;
         TKeyEvent    FOnKeyDown;
 
-        // Query-хук закрытия. Возврат false → отмена (e.cancel = true).
-        // Отдельный от FOnClick/FOnChange, потому что имеет возврат.
         using TCloseQueryEvent = std::function<bool(TObject*, OSEvent&)>;
         TCloseQueryEvent FOnCloseQuery;
 
         bool FUpdating = false;
 
     public:
-        TControl() = default;
-        explicit TControl(TControl* parent) { SetParent(parent); }
+        explicit TControl(TComponent* owner) : TComponent(owner) {}
 
-        ~TControl() override {
-            if (FParent) FParent->RemoveChildControl(this);
-        }
+        ~TControl() override = default;
 
         int Left()   const { return FLeft; }
         int Top()    const { return FTop; }
@@ -397,13 +404,14 @@ namespace vcl {
         const std::string& Caption() const { return FCaption; }
         virtual void SetCaption(const std::string& c) { FCaption = c; }
 
-        // Меняет ТОЛЬКО визуальную иерархию. Владение — в TComponent.
+        // ЯВНЫЙ вызов. Меняет ТОЛЬКО визуальную иерархию.
         void SetParent(TControl* p) {
             if (FParent == p) return;
             if (FParent) FParent->RemoveChildControl(this);
             FParent = p;
             if (p) p->AddChildControl(this);
         }
+        TControl* Parent() const { return FParent; }
 
         const std::vector<TControl*>& Children() const { return FChildControls; }
 
@@ -422,8 +430,6 @@ namespace vcl {
         TMouseEvent& OnMouseUp() { return FOnMouseUp; }
         TMouseEvent& OnMouseMove() { return FOnMouseMove; }
         TKeyEvent& OnKeyDown() { return FOnKeyDown; }
-
-        // Возврат false → отмена закрытия (e.cancel = true).
         TCloseQueryEvent& OnCloseQuery() { return FOnCloseQuery; }
 
         virtual void OnMove() {}
@@ -440,31 +446,31 @@ namespace vcl {
 
         const char* ClassName() const override { return "TControl"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TControl" || TComponent::InheritsFrom(cls);
+            return std::string(cls) == "TControl" || inherited::InheritsFrom(cls);
         }
     };
 
     // ============================================================================
     //  TOSControl — TControl с HWND.
-    //
-    //  FHandle — unique_ptr<IOSHandle>. Владение окном — здесь.
-    //  ~TOSControl: FHandle.reset() в ТЕЛЕ деструктора, пока this ещё валиден.
-    //  Это гарантирует, что ~Win отработает до разрушения подобъектов TControl,
-    //  и DestroyWindow внутри ~Win не «выстрелит» в полуразрушенный объект.
     // ============================================================================
     class TOSControl : public TControl, public IEventSink {
+        INHERITED(TControl);
     protected:
         std::unique_ptr<IOSHandle> FHandle;
         IOSDriver* FDriver = nullptr;
         int        FId = 0;
 
     public:
-        TOSControl() = default;
+        explicit TOSControl(TComponent* owner) : TControl(owner) {}
 
         ~TOSControl() override {
             // Тело деструктора: this ещё валиден, подобъекты целы.
             // reset() уничтожит Win ЗДЕСЬ — ~Win сделает sink=nullptr и DestroyWindow.
+            FHandle.reset();
         }
+
+        TOSControl(const TOSControl&) = delete;
+        TOSControl& operator=(const TOSControl&) = delete;
 
         bool CreateHandlesRecursive(IOSHandle* parentHandle) {
             if (!CreateHandle(parentHandle)) return false;
@@ -481,11 +487,6 @@ namespace vcl {
         void SetDriver(IOSDriver* d) { FDriver = d; }
         IOSDriver* Driver() const { return FDriver; }
 
-        // Пока не тащим если не требуется
-        // IOSHandle* Handle() const { return FHandle.get(); }
-
-        // Создать HWND себя. parentHandle == nullptr — top-level,
-        // иначе — дочернее окно относительно указанного родителя.
         virtual bool CreateHandle(IOSHandle* parentHandle) {
             if (FHandle) return true;
             if (!FDriver) return false;
@@ -509,7 +510,6 @@ namespace vcl {
             return true;
         }
 
-        // Раздать драйвер всему поддереву.
         void DistributeDriverRecursive() {
             if (!FDriver) return;
             for (auto* c : FChildControls) {
@@ -520,26 +520,25 @@ namespace vcl {
             }
         }
 
-        // FHandle != nullptr ⇒ FDriver != nullptr.
         void SetBounds(int l, int t, int w, int h) override {
-            TControl::SetBounds(l, t, w, h);
+            inherited::SetBounds(l, t, w, h);
             if (FHandle) FDriver->SetBounds(FHandle.get(), l, t, w, h);
         }
         void SetVisible(bool v) override {
-            TControl::SetVisible(v);
+            inherited::SetVisible(v);
             if (FHandle) FDriver->SetVisible(FHandle.get(), v);
         }
         void SetCaption(const std::string& c) override {
-            TControl::SetCaption(c);
+            inherited::SetCaption(c);
             if (FHandle) FDriver->SetText(FHandle.get(), c);
         }
         void SetEnabled(bool e) override {
-            TControl::SetEnabled(e);
+            inherited::SetEnabled(e);
             if (FHandle) FDriver->SetEnabled(FHandle.get(), e);
         }
         void Invalidate() override {
             if (FHandle) FDriver->Invalidate(FHandle.get());
-            TControl::Invalidate();
+            inherited::Invalidate();
         }
 
         void OnOSEvent(OSEvent& e) override {
@@ -578,8 +577,6 @@ namespace vcl {
                 DoPaint();
                 break;
             case OSEvent::Close:
-                // Query-хук: логика решает, можно ли закрываться.
-                // Возврат false → отмена (e.cancel = true).
                 if (FOnCloseQuery && !FOnCloseQuery(this, e)) {
                     e.cancel = true;
                 }
@@ -597,7 +594,7 @@ namespace vcl {
 
         const char* ClassName() const override { return "TOSControl"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TOSControl" || TControl::InheritsFrom(cls);
+            return std::string(cls) == "TOSControl" || inherited::InheritsFrom(cls);
         }
     private:
         static TMouseButton ToButton(int b) {
@@ -611,25 +608,23 @@ namespace vcl {
     };
 
     // ============================================================================
-    //  TForm — обычный TOSControl. Отличается поведением и двумя публичными
-    //  операциями: CreateHandle (свой HWND) и CreateFormHandlesRecursive
-    //  (построить поддерево относительно своего HWND).
+    //  TForm
     // ============================================================================
     class TForm : public TOSControl {
+        INHERITED(TOSControl);
         bool FClosed = false;
         TNotifyEvent FOnHide;
         TNotifyEvent FOnShow;
         TNotifyEvent FOnClose;
     public:
-        TForm() = default;
-        explicit TForm(TComponent* owner) : TOSControl() { (void)owner; }
+        explicit TForm(TComponent* owner) : TOSControl(owner) {}
+        ~TForm() override = default;
 
         ControlKind Kind() const override { return ControlKind::Form; }
 
         TNotifyEvent& OnShow() { return FOnShow; }
         TNotifyEvent& OnHide() { return FOnHide; }
         TNotifyEvent& OnClose() { return FOnClose; }
-
 
         bool CreateFormHandlesRecursive() {
             return CreateHandlesRecursive(FHandle.get());
@@ -648,45 +643,44 @@ namespace vcl {
         void OnOSEvent(OSEvent& e) override {
             switch (e.type) {
             case OSEvent::Close:
-                // Сначала даём логике решить (query-хук). Если она отменяет —
-                // e.cancel = true, и драйвер заглушит WM_CLOSE.
-                TOSControl::OnOSEvent(e);
+                inherited::OnOSEvent(e);
                 if (e.cancel) return;
-                // Логика разрешила — уведомляем post-factum и прячем.
                 Close();
                 return;
             case OSEvent::Show:
-                TOSControl::OnOSEvent(e);   // FVisible = true
-                if (FOnShow) FOnShow(this); // логический слой
+                inherited::OnOSEvent(e);
+                if (FOnShow) FOnShow(this);
                 return;
             case OSEvent::Hide:
-                TOSControl::OnOSEvent(e);   // FVisible = false
-                if (FOnHide) FOnHide(this); // логический слой
+                inherited::OnOSEvent(e);
+                if (FOnHide) FOnHide(this);
                 return;
             default:
-                TOSControl::OnOSEvent(e);
+                inherited::OnOSEvent(e);
                 return;
             }
         }
 
         const char* ClassName() const override { return "TForm"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TForm" || TOSControl::InheritsFrom(cls);
+            return std::string(cls) == "TForm" || inherited::InheritsFrom(cls);
         }
     };
 
     // ============================================================================
-    //  TApplication — одна MainForm. Всё.
+    //  TApplication : TComponent — корень дерева владения.
     // ============================================================================
-    class TApplication {
+    class TApplication : public TComponent {
+        INHERITED(TComponent);
         std::unique_ptr<IOSDriver> FDriver;
-        TForm* FMainForm = nullptr;
+        TForm* FMainForm = nullptr;   // ссылка; владение — через FOwnedComponents
         std::string FTitle;
     public:
-        TApplication() = default;
-        ~TApplication() {
-            delete FMainForm;
-            FMainForm = nullptr;
+        TApplication(TComponent* owner) : TComponent(owner) {}
+        ~TApplication() override {
+            // Сначала драйвер: окна умрут, sink-и обнулятся.
+            // Потом ~TComponent удалит форму и всех детей.
+            if (FDriver) FDriver->Shutdown();
         }
 
         void SetDriver(std::unique_ptr<IOSDriver> d) { FDriver = std::move(d); }
@@ -711,32 +705,23 @@ namespace vcl {
                 return 2;
             }
 
-            // 1. Раздать драйвер дереву.
             FMainForm->SetDriver(FDriver.get());
             FMainForm->DistributeDriverRecursive();
             FMainForm->SetVisible(false);
 
-            // 2. Создать HWND главной формы (top-level). Единственный nullptr
-            // в потоке создания HWND — здесь.
             if (!FMainForm->CreateHandle(nullptr))
                 return 3;
 
-            // 3. Построить HWND всего поддерева относительно HWND формы.
             if (!FMainForm->CreateFormHandlesRecursive())
                 return 4;
 
-            // 4. Подписка на закрытие главной формы = выход из приложения.
             FMainForm->OnClose() = [this](TObject*) { Terminate(); };
-
-            // 5. Показать.
             FMainForm->Show();
 
-            // 6. Цикл сообщений.
             return FDriver->RunMessageLoop();
         }
 
         void Terminate() {
-
             if (FDriver) FDriver->Quit();
         }
     };
@@ -745,33 +730,36 @@ namespace vcl {
     //  Простые контролы
     // ============================================================================
     class TLabel : public TOSControl {
+        INHERITED(TOSControl);
     public:
-        TLabel() = default;
-        explicit TLabel(TControl* parent) : TOSControl() { SetParent(parent); }
+        explicit TLabel(TComponent* owner) : TOSControl(owner) {}
+        ~TLabel() override = default;
 
         ControlKind Kind() const override { return ControlKind::Label; }
         const char* ClassName() const override { return "TLabel"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TLabel" || TOSControl::InheritsFrom(cls);
+            return std::string(cls) == "TLabel" || inherited::InheritsFrom(cls);
         }
     };
 
     class TButton : public TOSControl {
+        INHERITED(TOSControl);
     public:
-        TButton() = default;
-        explicit TButton(TControl* parent) : TOSControl() { SetParent(parent); }
+        explicit TButton(TComponent* owner) : TOSControl(owner) {}
+        ~TButton() override = default;
 
         ControlKind Kind() const override { return ControlKind::Button; }
         const char* ClassName() const override { return "TButton"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TButton" || TOSControl::InheritsFrom(cls);
+            return std::string(cls) == "TButton" || inherited::InheritsFrom(cls);
         }
     };
 
     class TCheckBox : public TOSControl {
+        INHERITED(TOSControl);
     public:
-        TCheckBox() = default;
-        explicit TCheckBox(TControl* parent) : TOSControl() { SetParent(parent); }
+        explicit TCheckBox(TComponent* owner) : TOSControl(owner) {}
+        ~TCheckBox() override = default;
 
         ControlKind Kind() const override { return ControlKind::CheckBox; }
 
@@ -786,14 +774,15 @@ namespace vcl {
 
         const char* ClassName() const override { return "TCheckBox"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TCheckBox" || TOSControl::InheritsFrom(cls);
+            return std::string(cls) == "TCheckBox" || inherited::InheritsFrom(cls);
         }
     };
 
     class TEdit : public TOSControl {
+        INHERITED(TOSControl);
     public:
-        TEdit() = default;
-        explicit TEdit(TControl* parent) : TOSControl() { SetParent(parent); }
+        explicit TEdit(TComponent* owner) : TOSControl(owner) {}
+        ~TEdit() override = default;
 
         ControlKind Kind() const override { return ControlKind::Edit; }
 
@@ -808,15 +797,16 @@ namespace vcl {
 
         const char* ClassName() const override { return "TEdit"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TEdit" || TOSControl::InheritsFrom(cls);
+            return std::string(cls) == "TEdit" || inherited::InheritsFrom(cls);
         }
     };
 
     class TComboBox : public TOSControl {
+        INHERITED(TOSControl);
         std::vector<std::string> FPending;
     public:
-        TComboBox() = default;
-        explicit TComboBox(TControl* parent) : TOSControl() { SetParent(parent); }
+        explicit TComboBox(TComponent* owner) : TOSControl(owner) {}
+        ~TComboBox() override = default;
 
         ControlKind Kind() const override { return ControlKind::ComboBox; }
 
@@ -834,7 +824,7 @@ namespace vcl {
         }
 
         bool CreateHandle(IOSHandle* parentHandle) override {
-            if (!TOSControl::CreateHandle(parentHandle)) return false;
+            if (!inherited::CreateHandle(parentHandle)) return false;
             FUpdating = true;
             for (auto& s : FPending) FDriver->AddString(FHandle.get(), s);
             if (!FPending.empty()) FDriver->SetSel(FHandle.get(), 0);
@@ -845,20 +835,21 @@ namespace vcl {
 
         const char* ClassName() const override { return "TComboBox"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TComboBox" || TOSControl::InheritsFrom(cls);
+            return std::string(cls) == "TComboBox" || inherited::InheritsFrom(cls);
         }
     };
 
     class TPanel : public TOSControl {
+        INHERITED(TOSControl);
     public:
-        TPanel() = default;
-        explicit TPanel(TControl* parent) : TOSControl() { SetParent(parent); }
+        explicit TPanel(TComponent* owner) : TOSControl(owner) {}
+        ~TPanel() override = default;
 
         ControlKind Kind() const override { return ControlKind::Panel; }
 
         const char* ClassName() const override { return "TPanel"; }
         bool InheritsFrom(const char* cls) const override {
-            return std::string(cls) == "TPanel" || TOSControl::InheritsFrom(cls);
+            return std::string(cls) == "TPanel" || inherited::InheritsFrom(cls);
         }
     };
 
@@ -868,6 +859,7 @@ namespace vcl {
 #if defined(_WIN32)
 
     class TWindowsCanvas : public TCanvas {
+        INHERITED(TCanvas);
         HDC      FDC = nullptr;
         HWND     FHwnd = nullptr;
         wil::unique_hbrush FBrush;
@@ -932,15 +924,6 @@ namespace vcl {
 
     class ITWindowsDriver {
     public:
-        // ---- Служебная структура окна ----------------------------------------
-        //
-        //  Win — владелец sink и hwnd.
-        //  ~Win — единственная точка, где Win рвёт свои связи:
-        //    * sink = nullptr  (владелец поля обнуляет поле)
-        //    * hwnd уникальный  (unique_hwnd сам вызовет DestroyWindow)
-        //  Порядок: sink = nullptr ДО разрушения hwnd → WM_* от DestroyWindow
-        //  прилетят в WndProc, увидят sink == nullptr и ничего не сделают.
-        // ------------------------------------------------------------------------
         struct Win : IOSHandle {
             wil::unique_hwnd hwnd;
             IEventSink* sink = nullptr;
@@ -950,17 +933,10 @@ namespace vcl {
             bool             isForm = false;
 
             ~Win() override {
-                // Владелец поля обнуляет поле.
-                // WM_* от DestroyWindow (ниже, в ~unique_hwnd) увидят sink == nullptr.
                 sink = nullptr;
-                // hwnd разрушится автоматически: unique_hwnd вызовет DestroyWindow.
-                // WM_NCDESTROY почистит GWLP_USERDATA и FByHwnd.
             }
         };
 
-        // ---- Хранилище окон ---------------------------------------------------
-        //  Владеет Win-обёртками НЕ драйвер — их владелец TOSControl
-        //  (unique_ptr<IOSHandle>). Здесь карта для маршрутизации WndProc.
         std::map<HWND, Win*> FByHwnd;
         HINSTANCE            FInst = nullptr;
         HINSTANCE            FHInst = nullptr;
@@ -968,11 +944,9 @@ namespace vcl {
 
         virtual ~ITWindowsDriver() = default;
 
-        // ---- Настройка инстанса ----------------------------------------------
         void SetHInstance(HINSTANCE h) { FHInst = h; }
         HINSTANCE GetHInstance() const { return FInst; }
 
-        // ---- Регистрация оконных классов -------------------------------------
         bool InitWindowClasses() {
             FInst = FHInst ? FHInst : GetModuleHandleW(nullptr);
 
@@ -986,7 +960,6 @@ namespace vcl {
             wc.lpszClassName = L"VCLFormClass";
             if (!RegisterClassExW(&wc) &&
                 GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-                LOG_LAST_ERROR();
                 return false;
             }
 
@@ -995,7 +968,6 @@ namespace vcl {
             wc2.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
             if (!RegisterClassExW(&wc2) &&
                 GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-                LOG_LAST_ERROR();
                 return false;
             }
             return true;
@@ -1008,7 +980,6 @@ namespace vcl {
             }
         }
 
-        // ---- Помощник создания окна ------------------------------------------
         Win* CreateWin(const ControlDesc& d,
             const wchar_t* cls,
             DWORD style, DWORD exStyle,
@@ -1030,7 +1001,6 @@ namespace vcl {
                 FInst, win));
 
             if (!win->hwnd) {
-                LOG_LAST_ERROR();
                 delete win;
                 return nullptr;
             }
@@ -1040,52 +1010,19 @@ namespace vcl {
             return win;
         }
 
-        // =======================================================================
-        //  Виртуальные хуки обработки сообщений.
-        //  Наследник переопределяет только нужные ему.
-        //  По умолчанию — пустые.
-        // =======================================================================
+        virtual void OnCommand(HWND, Win*, WORD, HWND, WORD) {}
+        virtual void OnPaint(HWND, Win*, HDC) {}
+        virtual bool OnEraseBackground(HWND, Win*, HDC) { return false; }
+        virtual void OnShowWindow(HWND, Win*, BOOL) {}
+        virtual bool OnClose(HWND, Win*) { return false; }
+        virtual void OnSize(HWND, Win*, int, int) {}
+        virtual void OnMove(HWND, Win*, int, int) {}
+        virtual void OnMouseDown(HWND, Win*, int, int, int) {}
+        virtual void OnMouseUp(HWND, Win*, int, int, int) {}
+        virtual void OnMouseMove(HWND, Win*, int, int) {}
+        virtual void OnKeyDown(HWND, Win*, int) {}
+        virtual void OnKeyUp(HWND, Win*, int) {}
 
-        virtual void OnCommand(HWND /*hwnd*/, Win* /*w*/, WORD /*code*/,
-            HWND /*child*/, WORD /*id*/) {
-        }
-
-        virtual void OnPaint(HWND /*hwnd*/, Win* /*w*/, HDC /*dc*/) {}
-
-        virtual bool OnEraseBackground(HWND /*hwnd*/, Win* /*w*/, HDC /*dc*/) {
-            return false;
-        }
-
-        virtual void OnShowWindow(HWND /*hwnd*/, Win* /*w*/, BOOL /*shown*/) {}
-
-        // true  → "отменяю закрытие", WM_CLOSE глушится (окно живо).
-        // false → "пусть закрывается", DefWindowProc сделает DestroyWindow.
-        virtual bool OnClose(HWND /*hwnd*/, Win* /*w*/) { return false; }
-
-        virtual void OnSize(HWND /*hwnd*/, Win* /*w*/,
-            int /*width*/, int /*height*/) {
-        }
-
-        virtual void OnMove(HWND /*hwnd*/, Win* /*w*/, int /*x*/, int /*y*/) {}
-
-        virtual void OnMouseDown(HWND /*hwnd*/, Win* /*w*/,
-            int /*x*/, int /*y*/, int /*button*/) {
-        }
-
-        virtual void OnMouseUp(HWND /*hwnd*/, Win* /*w*/,
-            int /*x*/, int /*y*/, int /*button*/) {
-        }
-
-        virtual void OnMouseMove(HWND /*hwnd*/, Win* /*w*/,
-            int /*x*/, int /*y*/) {
-        }
-
-        virtual void OnKeyDown(HWND /*hwnd*/, Win* /*w*/, int /*vk*/) {}
-
-        virtual void OnKeyUp(HWND /*hwnd*/, Win* /*w*/, int /*vk*/) {}
-
-        // ---- Универсальный WndProc -------------------------------------------
-        // Только маршрутизация. Никакой бизнес-логики.
         static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             Win* w = nullptr;
 
@@ -1124,25 +1061,20 @@ namespace vcl {
                 return 0;
 
             case WM_CLOSE:
-                // true → отмена (окно живо). false → DefWindowProc сделает DestroyWindow.
                 if (drv->OnClose(hwnd, w)) return 0;
                 break;
 
             case WM_DESTROY:
-                // Top-level окно ушло в DESTROY → цикл сообщений должен завершиться.
-                // Child-окна (GetParent != nullptr) этого не требуют.
                 if (!GetParent(hwnd)) {
                     PostQuitMessage(0);
                 }
                 return 0;
 
             case WM_NCDESTROY:
-                // Последнее сообщение окна. Чистим карты, но Win НЕ удаляем —
-                // им владеет TOSControl через unique_ptr<IOSHandle>.
                 if (w) {
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                     drv->FByHwnd.erase(hwnd);
-                    w->hwnd.release();   // HWND уже мёртв
+                    w->hwnd.release();
                 }
                 return DefWindowProcW(hwnd, msg, wp, lp);
 
@@ -1184,6 +1116,7 @@ namespace vcl {
     };
 
     class TWindowsDriver : public IOSDriver, public ITWindowsDriver {
+        INHERITED(IOSDriver);
     public:
         inline static TWindowsDriver* singleton_windows_driver = nullptr;
 
@@ -1193,7 +1126,6 @@ namespace vcl {
 
         const char* Name() const override { return "Windows"; }
 
-        // ---- IOSDriver: Init / Shutdown --------------------------------------
         bool Init() override {
             if (!InitWindowClasses()) return false;
             singleton_windows_driver = this;
@@ -1205,10 +1137,6 @@ namespace vcl {
             singleton_windows_driver = nullptr;
         }
 
-        // ---- IOSDriver: создание контролов -----------------------------------
-        //
-        //  DestroyControl убран: Win удаляется через unique_ptr<IOSHandle>
-        //  у владельца TOSControl. Драйвер лишь предоставляет операции над окном.
         IOSHandle* CreateControl(const ControlDesc& d) override {
             HWND parent = d.parent
                 ? static_cast<Win*>(d.parent)->hwnd.get()
@@ -1273,7 +1201,6 @@ namespace vcl {
             return CreateWin(d, cls, style, exStyle, parent, x, y, ww, hh, ctrlId);
         }
 
-        // ---- IOSDriver: операции над окном -----------------------------------
         void SetBounds(IOSHandle* h, int l, int t, int w, int ht) override {
             auto* win = static_cast<Win*>(h);
             if (!win || !win->hwnd) return;
@@ -1322,7 +1249,6 @@ namespace vcl {
             if (w && w->hwnd) ::InvalidateRect(w->hwnd.get(), nullptr, TRUE);
         }
 
-        // ---- IOSDriver: CheckBox / ComboBox / ListBox ------------------------
         void SetCheck(IOSHandle* h, bool c) override {
             auto* win = static_cast<Win*>(h);
             if (win && win->hwnd)
@@ -1356,7 +1282,6 @@ namespace vcl {
                 ? (int)SendMessageW(win->hwnd.get(), CB_GETCURSEL, 0, 0) : -1;
         }
 
-        // ---- IOSDriver: sink-и -----------------------------------------------
         void SetEventSink(IOSHandle* h, IEventSink* sink) override {
             if (auto* w = static_cast<Win*>(h)) w->sink = sink;
         }
@@ -1371,7 +1296,6 @@ namespace vcl {
             return it == FByHwnd.end() ? nullptr : it->second->sink;
         }
 
-        // ---- IOSDriver: canvas -----------------------------------------------
         std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h,
             HDC dc = nullptr,
             bool ownsDC = false) override {
@@ -1382,7 +1306,6 @@ namespace vcl {
             return std::make_unique<TWindowsCanvas>(tmp, w->hwnd.get(), /*ownsDC=*/true);
         }
 
-        // ---- IOSDriver: цикл сообщений ---------------------------------------
         int RunMessageLoop() override {
             MSG msg;
             while (true) {
@@ -1397,12 +1320,7 @@ namespace vcl {
 
         void Quit() override { PostQuitMessage(0); }
 
-        // =======================================================================
-        //  Переопределение событий Windows.
-        //  Пишем только то, что нужно.
-        // =======================================================================
-
-        void OnPaint(HWND /*hwnd*/, Win* w, HDC dc) override {
+        void OnPaint(HWND, Win* w, HDC dc) override {
             if (w && w->sink) {
                 if (auto* osc = dynamic_cast<TOSControl*>(w->sink)) {
                     osc->DoPaint(dc);
@@ -1414,8 +1332,7 @@ namespace vcl {
             }
         }
 
-        void OnCommand(HWND /*hwnd*/, Win* /*w*/, WORD code,
-            HWND child, WORD /*id*/) override {
+        void OnCommand(HWND, Win*, WORD code, HWND child, WORD) override {
             if (!child) return;
             if (auto* sink = SinkForHwnd(child)) {
                 OSEvent e; e.key = (int)code;
@@ -1448,7 +1365,7 @@ namespace vcl {
             return false;
         }
 
-        void OnShowWindow(HWND /*hwnd*/, Win* w, BOOL shown) override {
+        void OnShowWindow(HWND, Win* w, BOOL shown) override {
             if (w && w->sink) {
                 OSEvent e;
                 e.type = shown ? OSEvent::Show : OSEvent::Hide;
@@ -1456,21 +1373,15 @@ namespace vcl {
             }
         }
 
-        // true  → "отменяю закрытие", WM_CLOSE глушится.
-        // false → пусть DefWindowProc сделает DestroyWindow.
-        //
-        // Никаких кастов к конкретным типам: sink сам решает,
-        // выставив e.cancel = true.
-        bool OnClose(HWND /*hwnd*/, Win* w) override {
+        bool OnClose(HWND, Win* w) override {
             if (!w || !w->sink) return false;
-
             OSEvent e; e.type = OSEvent::Close;
             e.cancel = false;
             w->sink->OnOSEvent(e);
             return e.cancel;
         }
 
-        void OnSize(HWND /*hwnd*/, Win* w, int width, int height) override {
+        void OnSize(HWND, Win* w, int width, int height) override {
             if (w && w->sink) {
                 OSEvent e; e.type = OSEvent::Resize;
                 e.width = width; e.height = height;
@@ -1478,7 +1389,7 @@ namespace vcl {
             }
         }
 
-        void OnMove(HWND /*hwnd*/, Win* w, int x, int y) override {
+        void OnMove(HWND, Win* w, int x, int y) override {
             if (w && w->sink) {
                 OSEvent e; e.type = OSEvent::Move;
                 e.x = x; e.y = y;
@@ -1486,7 +1397,7 @@ namespace vcl {
             }
         }
 
-        void OnMouseDown(HWND /*hwnd*/, Win* w, int x, int y, int button) override {
+        void OnMouseDown(HWND, Win* w, int x, int y, int button) override {
             if (w && w->sink) {
                 OSEvent e; e.type = OSEvent::MouseDown;
                 e.x = x; e.y = y; e.button = button;
@@ -1494,7 +1405,7 @@ namespace vcl {
             }
         }
 
-        void OnMouseUp(HWND /*hwnd*/, Win* w, int x, int y, int button) override {
+        void OnMouseUp(HWND, Win* w, int x, int y, int button) override {
             if (w && w->sink) {
                 OSEvent e; e.type = OSEvent::MouseUp;
                 e.x = x; e.y = y; e.button = button;
@@ -1502,7 +1413,7 @@ namespace vcl {
             }
         }
 
-        void OnMouseMove(HWND /*hwnd*/, Win* w, int x, int y) override {
+        void OnMouseMove(HWND, Win* w, int x, int y) override {
             if (w && w->sink) {
                 OSEvent e; e.type = OSEvent::MouseMove;
                 e.x = x; e.y = y;
@@ -1510,14 +1421,14 @@ namespace vcl {
             }
         }
 
-        void OnKeyDown(HWND /*hwnd*/, Win* w, int vk) override {
+        void OnKeyDown(HWND, Win* w, int vk) override {
             if (w && w->sink) {
                 OSEvent e; e.type = OSEvent::KeyDown; e.key = vk;
                 w->sink->OnOSEvent(e);
             }
         }
 
-        void OnKeyUp(HWND /*hwnd*/, Win* w, int vk) override {
+        void OnKeyUp(HWND, Win* w, int vk) override {
             if (w && w->sink) {
                 OSEvent e; e.type = OSEvent::KeyUp; e.key = vk;
                 w->sink->OnOSEvent(e);
@@ -1533,6 +1444,14 @@ namespace vcl {
 
 // ============================================================================
 //  wWinMain — точка входа
+//
+//  ВЛАДЕНИЕ:
+//   * app (TApplication : TComponent) владеет формой и всем поддеревом.
+//   * form — new TForm(&app). Владение — у app.
+//   * panel — new TPanel(form). Владение — у form.
+//   * label — new TLabel(panel). Владение — у panel.
+//   * button/chk/combo/edit — new T*(form). Владение — у form.
+//   * SetParent — визуальная иерархия, ЯВНО.
 // ============================================================================
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     using namespace vcl;
@@ -1548,17 +1467,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
         TWindowsDriver::singleton_windows_driver = wdrv;
     }
 
-    TApplication app;
+    TApplication app(nullptr);
     app.SetDriver(std::unique_ptr<IOSDriver>(drv));
     app.SetTitle("VCL Demo");
 
-    // --- Главная форма ---
-    auto* form = new TForm();
+    // --- Главная форма. Владеет app. ---
+    auto* form = new TForm(&app);
     form->SetCaption("Hello VCL (Win32)");
     form->SetBounds(200, 200, 480, 320);
 
-    // Query-хук: спросить пользователя, закрывать ли приложение.
-    // false → e.cancel = true → WM_CLOSE глушится, окно живо.
     form->OnCloseQuery() = [](TObject*, OSEvent&) -> bool {
         int r = MessageBoxW(nullptr,
             L"Точно закрыть приложение?",
@@ -1567,17 +1484,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
         return r == IDYES;
         };
 
-    // --- Панель ---
+    // --- Панель. Владеет form. ---
     auto* panel = new TPanel(form);
+    panel->SetParent(form);
     panel->SetBounds(10, 10, 460, 80);
 
-    // --- Метка внутри панели ---
+    // --- Метка внутри панели. Владеет panel. ---
     auto* label = new TLabel(panel);
+    label->SetParent(panel);
     label->SetBounds(20, 30, 400, 24);
     label->SetCaption("Press the button!");
 
-    // --- Кнопка на форме ---
+    // --- Кнопка на форме. Владеет form. ---
     auto* button = new TButton(form);
+    button->SetParent(form);
     button->SetBounds(20, 120, 160, 40);
     button->SetCaption("Click me");
 
@@ -1586,6 +1506,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
         };
 
     auto* chk = new TCheckBox(form);
+    chk->SetParent(form);
     chk->SetBounds(200, 120, 200, 30);
     chk->SetCaption("Check me");
     chk->OnChange() = [chk](TObject*) {
@@ -1593,6 +1514,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
         };
 
     auto* combo = new TComboBox(form);
+    combo->SetParent(form);
     combo->SetBounds(20, 180, 200, 200);
     combo->AddItem("Москва");
     combo->AddItem("Петербург");
@@ -1603,6 +1525,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
         };
 
     auto* edit = new TEdit(form);
+    edit->SetParent(form);
     edit->SetBounds(20, 230, 250, 25);
     edit->SetText("Введите текст...");
     edit->OnChange() = [edit](TObject*) {
