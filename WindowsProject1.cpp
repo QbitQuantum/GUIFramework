@@ -267,7 +267,8 @@ namespace vcl {
         virtual int  RunMessageLoop() = 0;
         virtual void Quit() = 0;
 
-        virtual IOSHandle* CreateControl(const ControlDesc& d) = 0;
+        virtual std::unique_ptr<IOSHandle> 
+            CreateControl(const ControlDesc& d) = 0;
 
         virtual void SetBounds(IOSHandle* h, int l, int t, int w, int ht) = 0;
         virtual void SetVisible(IOSHandle* h, bool v) = 0;
@@ -500,7 +501,7 @@ namespace vcl {
             d.id = FId;
             d.parent = parentHandle;
 
-            FHandle.reset(FDriver->CreateControl(d));
+            FHandle = FDriver->CreateControl(d);
             if (!FHandle) return false;
 
             FDriver->SetEventSink(FHandle.get(), this);
@@ -980,33 +981,26 @@ namespace vcl {
             }
         }
 
-        Win* CreateWin(const ControlDesc& d,
+        std::unique_ptr<Win> CreateWin(const ControlDesc& d,
             const wchar_t* cls,
             DWORD style, DWORD exStyle,
             HWND parent,
             int x, int y, int w, int h,
             int ctrlId)
         {
-            auto* win = new Win();
+            auto win = std::make_unique<Win>();
             win->kind = d.kind;
             win->id = d.id;
             win->isForm = (d.kind == ControlKind::Form);
             win->owner = this;
-
-            std::wstring wcap = Utf8ToW(d.caption);
-
             win->hwnd.reset(::CreateWindowExW(
-                exStyle, cls, wcap.c_str(), style,
+                exStyle, cls, Utf8ToW(d.caption).c_str(), style,
                 x, y, w, h, parent, (HMENU)(INT_PTR)ctrlId,
-                FInst, win));
+                FInst, win.get()));
 
-            if (!win->hwnd) {
-                delete win;
-                return nullptr;
-            }
-
-            SetWindowLongPtrW(win->hwnd.get(), GWLP_USERDATA, (LONG_PTR)win);
-            FByHwnd[win->hwnd.get()] = win;
+            if (!win->hwnd) return nullptr;
+            SetWindowLongPtrW(win->hwnd.get(), GWLP_USERDATA, (LONG_PTR)win.get());
+            FByHwnd[win->hwnd.get()] = win.get();
             return win;
         }
 
@@ -1137,7 +1131,7 @@ namespace vcl {
             singleton_windows_driver = nullptr;
         }
 
-        IOSHandle* CreateControl(const ControlDesc& d) override {
+        std::unique_ptr<IOSHandle> CreateControl(const ControlDesc& d) override {
             HWND parent = d.parent
                 ? static_cast<Win*>(d.parent)->hwnd.get()
                 : nullptr;
@@ -1197,7 +1191,7 @@ namespace vcl {
             int ctrlId = 0;
             if (d.kind != ControlKind::Form && d.kind != ControlKind::Panel)
                 ctrlId = (d.id ? d.id : FNextId++);
-
+            
             return CreateWin(d, cls, style, exStyle, parent, x, y, ww, hh, ctrlId);
         }
 
