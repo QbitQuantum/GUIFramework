@@ -416,24 +416,14 @@ namespace vcl {
         TOSControl(const TOSControl&) = delete;
         TOSControl& operator=(const TOSControl&) = delete;
 
-        bool CreateHandlesRecursive(IOSHandle* parentHandle) {
-            if (!CreateHandle(parentHandle)) return false;
-            for (auto* c : FChildControls) {
-                if (auto* os = dynamic_cast<TOSControl*>(c)) {
-                    if (!os->CreateHandlesRecursive(FHandle.get())) return false;
-                }
-            }
-            return true;
-        }
-
         virtual ControlKind Kind() const { return ControlKind::Panel; }
 
         void SetDriver(IOSDriver* d) { FDriver = d; }
         IOSDriver* Driver() const { return FDriver; }
 
-        virtual bool CreateHandle(IOSHandle* parentHandle) {
-            if (FHandle) return true;
-            if (!FDriver) return false;
+        virtual void CreateHandle(IOSHandle* parentHandle) {
+            if (FHandle) return;
+            if (!FDriver) return;
 
             ControlDesc d;
             d.kind = Kind();
@@ -445,22 +435,26 @@ namespace vcl {
             d.parent = parentHandle;
 
             FHandle = FDriver->CreateControl(d);
-            if (!FHandle) return false;
+            if (!FHandle) return;
 
             FDriver->SetEventSink(FHandle.get(), this);
             FDriver->SetText(FHandle.get(), FCaption);
             FDriver->SetVisible(FHandle.get(), FVisible);
             FDriver->SetEnabled(FHandle.get(), FEnabled);
-            return true;
+        }
+
+        void CreateHandlesRecursive(IOSHandle* parentHandle) {
+            CreateHandle(parentHandle);
+            for (auto* c : FChildControls) {
+                c->CreateHandlesRecursive(parentHandle);
+            }
         }
 
         void DistributeDriverRecursive() {
             if (!FDriver) return;
             for (auto* c : FChildControls) {
-                if (auto* os = dynamic_cast<TOSControl*>(c)) {
-                    os->SetDriver(FDriver);
-                    os->DistributeDriverRecursive();
-                }
+                c->SetDriver(FDriver);
+                c->DistributeDriverRecursive();
             }
         }
 
@@ -561,8 +555,9 @@ namespace vcl {
         TNotifyEvent& OnHide() { return FOnHide; }
         TCloseEvent& OnClose() { return FOnClose;}
 
-        bool CreateFormHandlesRecursive() {
-            return CreateHandlesRecursive(FHandle.get());
+        void CreateHandle() {
+            inherited::CreateHandle(nullptr);
+            CreateHandlesRecursive(FHandle.get());
         }
 
         void Show() { inherited::SetVisible(true); }
@@ -591,59 +586,6 @@ namespace vcl {
         const char* ClassName() const override { return "TForm"; }
         bool InheritsFrom(const char* cls) const override {
             return std::string(cls) == "TForm" || inherited::InheritsFrom(cls);
-        }
-    };
-
-    // ============================================================================
-    //  TApplication : TComponent — корень дерева владения.
-    // ============================================================================
-    class TApplication : public TComponent {
-        INHERITED(TComponent);
-        std::unique_ptr<IOSDriver> FDriver;
-        TForm* FMainForm = nullptr;   // ссылка; владение — через FOwnedComponents
-        std::string FTitle;
-    public:
-        TApplication(TComponent* owner) : TComponent(owner) {}
-        ~TApplication() override {
-            // Сначала драйвер: окна умрут, sink-и обнулятся.
-            // Потом ~TComponent удалит форму и всех детей.
-            if (FDriver) FDriver->Shutdown();
-        }
-
-        void SetDriver(std::unique_ptr<IOSDriver> d) { FDriver = std::move(d); }
-
-        const std::string& Title() const { return FTitle; }
-        void SetTitle(const std::string& t) { FTitle = t; }
-
-        void SetMainForm(TForm* f) { FMainForm = f; }
-        TForm* MainForm() const { return FMainForm; }
-
-        int Run() {
-            if (!FDriver) {
-                std::cerr << "[TApplication] No driver set!\n";
-                return 1;
-            }
-            if (!FMainForm) {
-                std::cerr << "[TApplication] No main form!\n";
-                return 1;
-            }
-            if (!FDriver->Init()) {
-                std::cerr << "[TApplication] Driver Init() failed!\n";
-                return 2;
-            }
-
-            FMainForm->SetDriver(FDriver.get());
-            FMainForm->DistributeDriverRecursive();
-
-            if (!FMainForm->CreateHandle(nullptr))
-                return 3;
-
-            if (!FMainForm->CreateFormHandlesRecursive())
-                return 4;
-
-            FMainForm->Show();
-
-            return FDriver->RunMessageLoop();
         }
     };
 
@@ -744,14 +686,13 @@ namespace vcl {
             FUpdating = false;
         }
 
-        bool CreateHandle(IOSHandle* parentHandle) override {
-            if (!inherited::CreateHandle(parentHandle)) return false;
+        void CreateHandle(IOSHandle* parentHandle) override {
+            inherited::CreateHandle(parentHandle);
             FUpdating = true;
             for (auto& s : FPending) FDriver->AddString(FHandle.get(), s);
             if (!FPending.empty()) FDriver->SetSel(FHandle.get(), 0);
             FUpdating = false;
             FPending.clear();
-            return true;
         }
 
         const char* ClassName() const override { return "TComboBox"; }
@@ -774,6 +715,54 @@ namespace vcl {
         }
     };
 
+    // ============================================================================
+    //  TApplication : TComponent — корень дерева владения.
+    // ============================================================================
+    class TApplication : public TComponent {
+        INHERITED(TComponent);
+        std::unique_ptr<IOSDriver> FDriver;
+        TForm* FMainForm = nullptr;   // ссылка; владение — через FOwnedComponents
+        std::string FTitle;
+    public:
+        TApplication(TComponent* owner) : TComponent(owner) {}
+        ~TApplication() override {
+            // Сначала драйвер: окна умрут, sink-и обнулятся.
+            // Потом ~TComponent удалит форму и всех детей.
+            if (FDriver) FDriver->Shutdown();
+        }
+
+        void SetDriver(std::unique_ptr<IOSDriver> d) { FDriver = std::move(d); }
+
+        const std::string& Title() const { return FTitle; }
+        void SetTitle(const std::string& t) { FTitle = t; }
+
+        void SetMainForm(TForm* f) { FMainForm = f; }
+        TForm* MainForm() const { return FMainForm; }
+
+        int Run() {
+            if (!FDriver) {
+                std::cerr << "[TApplication] No driver set!\n";
+                return 1;
+            }
+            if (!FMainForm) {
+                std::cerr << "[TApplication] No main form!\n";
+                return 1;
+            }
+            if (!FDriver->Init()) {
+                std::cerr << "[TApplication] Driver Init() failed!\n";
+                return 2;
+            }
+
+            FMainForm->SetDriver(FDriver.get());
+            FMainForm->DistributeDriverRecursive();
+
+            FMainForm->CreateHandle();
+
+            FMainForm->Show();
+
+            return FDriver->RunMessageLoop();
+        }
+    };
     // ============================================================================
     //  Windows-драйвер
     // ============================================================================
@@ -1063,9 +1052,7 @@ namespace vcl {
         }
 
         std::unique_ptr<IOSHandle> CreateControl(const ControlDesc& d) override {
-            HWND parent = d.parent
-                ? static_cast<Win*>(d.parent)->hwnd.get()
-                : nullptr;
+            HWND parent = d.parent ? static_cast<Win*>(d.parent)->hwnd.get() : nullptr;
 
             DWORD style = 0, exStyle = 0;
             const wchar_t* cls = nullptr;
@@ -1074,7 +1061,6 @@ namespace vcl {
             case ControlKind::Form:
                 cls = L"VCLFormClass";
                 style = WS_OVERLAPPEDWINDOW;
-                parent = nullptr;
                 break;
             case ControlKind::Panel:
                 cls = L"VCLPanelClass";
