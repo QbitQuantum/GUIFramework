@@ -270,6 +270,9 @@ namespace vcl {
         virtual std::unique_ptr<IOSHandle>
             CreateControl(const ControlDesc& d) = 0;
 
+        virtual std::unique_ptr<TCanvas> 
+            CreateCanvas(IOSHandle* h) = 0;
+
         virtual void SetBounds(IOSHandle* h, int l, int t, int w, int ht) = 0;
         virtual void SetVisible(IOSHandle* h, bool v) = 0;
         virtual void SetText(IOSHandle* h, const std::string& text) = 0;
@@ -283,9 +286,6 @@ namespace vcl {
         virtual void SetSel(IOSHandle* h, int idx) = 0;
         virtual int  GetSel(IOSHandle* h) const = 0;
         virtual void SetEventSink(IOSHandle* h, IEventSink* sink) = 0;
-        virtual std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h,
-            HDC dc = nullptr,
-            bool ownsDC = false) = 0;
     };
 
     // ============================================================================
@@ -306,6 +306,7 @@ namespace vcl {
         TNotifyEvent FOnChange;
         TNotifyEvent FOnHide;
         TNotifyEvent FOnShow;
+        TNotifyEvent FOnPaint;
         TCloseEvent  FOnClose;
         TMouseEvent  FOnMouseDown;
         TMouseEvent  FOnMouseUp;
@@ -360,7 +361,7 @@ namespace vcl {
         virtual void OnMove() {}
         virtual void OnResize() {}
         virtual void OnVisibleChanged() {}
-        virtual void OnPaint(TCanvas& /*Canvas*/) {}
+        virtual void OnPaint(TCanvas* Canvas) {}
         virtual void Invalidate() {}
 
         const char* ClassName() const override { return "TControl"; }
@@ -408,7 +409,7 @@ namespace vcl {
             if (p) p->AddChildControl(this);
         }
 
-        virtual void PaintTree(TCanvas& c) {
+        virtual void PaintTree(TCanvas* c) {
             if (!FVisible) return;
             OnPaint(c);
             for (auto* child : FChildControls) child->PaintTree(c);
@@ -512,18 +513,9 @@ namespace vcl {
             case OSEvent::Command:
                 if (FOnClick) FOnClick(this);
                 break;
-            case OSEvent::Paint:
-                DoPaint();
-                break;
             case OSEvent::Show:      FVisible = true;  break;
             case OSEvent::Hide:      FVisible = false; break;
             }
-        }
-
-        void DoPaint(HDC dcFromPaint = nullptr) {
-            if (!FDriver || !FHandle) return;
-            auto canvas = FDriver->CreateCanvas(FHandle.get(), dcFromPaint);
-            if (canvas) PaintTree(*canvas);
         }
 
         const char* ClassName() const override { return "TOSControl"; }
@@ -542,12 +534,26 @@ namespace vcl {
     };
 
     // ============================================================================
-    //  TForm
+    //  TCustomForm
     // ============================================================================
-    class TForm : public TOSControl {
+    class TCustomForm : public TOSControl {
         INHERITED(TOSControl);
     public:
-        explicit TForm(TComponent* owner) : TOSControl(owner) {}
+        std::unique_ptr<TCanvas> Canvas;
+        void CreateCanvas() {
+            Canvas = FDriver->CreateCanvas(FHandle.get());
+        };
+        explicit TCustomForm(TComponent* owner) : TOSControl(owner) {}
+        ~TCustomForm() override = default;
+    };
+
+    // ============================================================================
+    //  TForm
+    // ============================================================================
+    class TForm : public TCustomForm {
+        INHERITED(TCustomForm);
+    public:
+        explicit TForm(TComponent* owner) : TCustomForm(owner) { }
         ~TForm() override = default;
 
         ControlKind Kind() const override { return ControlKind::Form; }
@@ -564,6 +570,11 @@ namespace vcl {
         void Show() { inherited::SetVisible(true); }
         void Hide() { inherited::SetVisible(false); }
 
+        void PaintTree(TCanvas* c) override {
+            if (!c) return;
+            c->Line(0, 0, 400, 400);
+        }
+
         void OnOSEvent(OSEvent& e) override {
             switch (e.type) {
             case OSEvent::Close:
@@ -578,6 +589,9 @@ namespace vcl {
                 inherited::OnOSEvent(e);
                 if (FOnHide) FOnHide(this);
                 return;
+            case OSEvent::Paint:
+                PaintTree(Canvas.get());
+                break;
             default:
                 inherited::OnOSEvent(e);
                 return;
@@ -759,6 +773,7 @@ namespace vcl {
 
             FMainForm->CreateHandle();
 
+            FMainForm->CreateCanvas();
             FMainForm->Show();
 
             return FDriver->RunMessageLoop();
@@ -771,23 +786,16 @@ namespace vcl {
 
     class TWindowsCanvas : public TCanvas {
         INHERITED(TCanvas);
-        HDC      FDC = nullptr;
         HWND     FHwnd = nullptr;
+
+        wil::unique_hdc_window FDc;
         wil::unique_hbrush FBrush;
         wil::unique_hpen   FPen;
         COLORREF FColor = RGB(0, 0, 0);
-        bool     FOwnsDC = false;
 
     public:
-        TWindowsCanvas(HDC dc, HWND hwnd, bool ownsDC)
-            : FDC(dc), FHwnd(hwnd), FOwnsDC(ownsDC) {
-        }
-
-        ~TWindowsCanvas() override {
-            if (FOwnsDC && FDC && FHwnd) {
-                ::ReleaseDC(FHwnd, FDC);
-            }
-        }
+        TWindowsCanvas(HWND hwnd) : FHwnd(hwnd), FDc(wil::GetDC(hwnd)) { }
+        ~TWindowsCanvas() override { }
 
         void SetColor(TColor c) override {
             FColor = RGB(c.r, c.g, c.b);
@@ -798,38 +806,38 @@ namespace vcl {
         void FillRect(int l, int t, int w, int h) override {
             RECT r{ l, t, l + w, t + h };
             HBRUSH b = FBrush ? FBrush.get() : (HBRUSH)GetStockObject(BLACK_BRUSH);
-            ::FillRect(FDC, &r, b);
+            ::FillRect(FDc.get(), &r, b);
         }
 
         void DrawRect(int l, int t, int w, int h) override {
-            HBRUSH oldB = (HBRUSH)SelectObject(FDC, GetStockObject(NULL_BRUSH));
-            HPEN   oldP = (HPEN)SelectObject(FDC, FPen ? FPen.get()
+            HBRUSH oldB = (HBRUSH)SelectObject(FDc.get(), GetStockObject(NULL_BRUSH));
+            HPEN   oldP = (HPEN)SelectObject(FDc.get(), FPen ? FPen.get()
                 : GetStockObject(BLACK_PEN));
-            ::Rectangle(FDC, l, t, l + w, t + h);
-            SelectObject(FDC, oldB);
-            SelectObject(FDC, oldP);
+            ::Rectangle(FDc.get(), l, t, l + w, t + h);
+            SelectObject(FDc.get(), oldB);
+            SelectObject(FDc.get(), oldP);
         }
 
         void DrawTextOut(int x, int y, const std::string& text) override {
-            SetTextColor(FDC, FColor);
-            SetBkMode(FDC, TRANSPARENT);
+            SetTextColor(FDc.get(), FColor);
+            SetBkMode(FDc.get(), TRANSPARENT);
             std::wstring w = Utf8ToW(text);
-            ::TextOutW(FDC, x, y, w.c_str(), (int)w.size());
+            ::TextOutW(FDc.get(), x, y, w.c_str(), (int)w.size());
         }
 
         void Line(int x1, int y1, int x2, int y2) override {
-            HPEN oldP = (HPEN)SelectObject(FDC, FPen ? FPen.get()
+            HPEN oldP = (HPEN)SelectObject(FDc.get(), FPen ? FPen.get()
                 : GetStockObject(BLACK_PEN));
-            MoveToEx(FDC, x1, y1, nullptr);
-            ::LineTo(FDC, x2, y2);
-            SelectObject(FDC, oldP);
+            MoveToEx(FDc.get(), x1, y1, nullptr);
+            ::LineTo(FDc.get(), x2, y2);
+            SelectObject(FDc.get(), oldP);
         }
 
         void Clear(TColor c) override {
             RECT r;
             GetClientRect(FHwnd, &r);
             wil::unique_hbrush b(CreateSolidBrush(RGB(c.r, c.g, c.b)));
-            ::FillRect(FDC, &r, b.get());
+            ::FillRect(FDc.get(), &r, b.get());
         }
     };
 
@@ -1196,14 +1204,10 @@ namespace vcl {
             return it == FByHwnd.end() ? nullptr : it->second->sink;
         }
 
-        std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h,
-            HDC dc = nullptr,
-            bool ownsDC = false) override {
+        std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h) override {
             auto* w = static_cast<Win*>(h);
             if (!w || !w->hwnd) return nullptr;
-            if (dc) return std::make_unique<TWindowsCanvas>(dc, w->hwnd.get(), ownsDC);
-            HDC tmp = GetDC(w->hwnd.get());
-            return std::make_unique<TWindowsCanvas>(tmp, w->hwnd.get(), /*ownsDC=*/true);
+            return std::make_unique<TWindowsCanvas>(w->hwnd.get());
         }
 
         int RunMessageLoop() override {
@@ -1216,18 +1220,6 @@ namespace vcl {
                 DispatchMessageW(&msg);
             }
             return 0;
-        }
-
-        void OnPaint(HWND, Win* w, HDC dc) override {
-            if (w && w->sink) {
-                if (auto* osc = dynamic_cast<TOSControl*>(w->sink)) {
-                    osc->DoPaint(dc);
-                }
-                else {
-                    OSEvent e; e.type = OSEvent::Paint;
-                    w->sink->OnOSEvent(e);
-                }
-            }
         }
 
         void OnCommand(HWND, Win*, WORD code, HWND child, WORD) override {
@@ -1248,6 +1240,13 @@ namespace vcl {
                 default:
                     break;
                 }
+            }
+        }
+
+        void OnPaint(HWND, Win* w, HDC dc) override {
+            if (w && w->sink) {
+                OSEvent e; e.type = OSEvent::Paint;
+                w->sink->OnOSEvent(e);
             }
         }
 
