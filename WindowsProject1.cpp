@@ -647,10 +647,6 @@ namespace vcl {
 
             return FDriver->RunMessageLoop();
         }
-
-        void Terminate() {
-            if (FDriver) FDriver->Quit();
-        }
     };
 
     // ============================================================================
