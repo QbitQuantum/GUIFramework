@@ -448,7 +448,7 @@ namespace vcl {
         void CreateHandlesRecursive(IOSHandle* parentHandle) {
             CreateHandle(parentHandle);
             for (auto* c : FChildControls) {
-                c->CreateHandlesRecursive(parentHandle);
+                c->CreateHandlesRecursive(FHandle.get());
             }
         }
 
