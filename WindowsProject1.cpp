@@ -379,6 +379,17 @@ namespace vcl {
         std::vector<TOSControl*> FChildControls;    // дети-контролы, НЕ владеет
         IOSDriver* FDriver = nullptr;
         int        FId = 0;
+    private:
+
+        void AddChildControl(TOSControl* c) {
+            if (c && std::find(FChildControls.begin(), FChildControls.end(), c) == FChildControls.end())
+                FChildControls.push_back(c);
+        }
+
+        void RemoveChildControl(TOSControl* c) {
+            FChildControls.erase(std::remove(FChildControls.begin(), FChildControls.end(), c),
+                FChildControls.end());
+        }
 
     public:
         explicit TOSControl(TComponent* owner) : TControl(owner) {}
@@ -395,15 +406,6 @@ namespace vcl {
             if (FParent) RemoveChildControl(this);
             FParent = p;
             if (p) p->AddChildControl(this);
-        }
-
-        void AddChildControl(TOSControl* c) {
-            if (c && std::find(FChildControls.begin(), FChildControls.end(), c) == FChildControls.end())
-                FChildControls.push_back(c);
-        }
-        void RemoveChildControl(TOSControl* c) {
-            FChildControls.erase(std::remove(FChildControls.begin(), FChildControls.end(), c),
-                FChildControls.end());
         }
 
         virtual void PaintTree(TCanvas& c) {
