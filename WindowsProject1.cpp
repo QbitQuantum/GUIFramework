@@ -171,6 +171,7 @@ namespace vcl {
     //  События
     // ============================================================================
     using TNotifyEvent = std::function<void(TObject* Sender)>;
+    using TCloseEvent = std::function<void(TObject*, bool&)>;
 
     enum TMouseButton { mbLeft, mbRight, mbMiddle };
 
@@ -310,14 +311,13 @@ namespace vcl {
 
         TNotifyEvent FOnClick;
         TNotifyEvent FOnChange;
+        TNotifyEvent FOnHide;
+        TNotifyEvent FOnShow;
+        TCloseEvent  FOnClose;
         TMouseEvent  FOnMouseDown;
         TMouseEvent  FOnMouseUp;
         TMouseEvent  FOnMouseMove;
         TKeyEvent    FOnKeyDown;
-
-        using TCloseQueryEvent = std::function<bool(TObject*, OSEvent&)>;
-        TCloseQueryEvent FOnCloseQuery;
-
         bool FUpdating = false;
 
     public:
@@ -381,7 +381,6 @@ namespace vcl {
         TMouseEvent& OnMouseUp() { return FOnMouseUp; }
         TMouseEvent& OnMouseMove() { return FOnMouseMove; }
         TKeyEvent& OnKeyDown() { return FOnKeyDown; }
-        TCloseQueryEvent& OnCloseQuery() { return FOnCloseQuery; }
 
         virtual void OnMove() {}
         virtual void OnResize() {}
@@ -527,11 +526,6 @@ namespace vcl {
             case OSEvent::Paint:
                 DoPaint();
                 break;
-            case OSEvent::Close:
-                if (FOnCloseQuery && !FOnCloseQuery(this, e)) {
-                    e.cancel = true;
-                }
-                break;
             case OSEvent::Show:      FVisible = true;  break;
             case OSEvent::Hide:      FVisible = false; break;
             }
@@ -563,10 +557,6 @@ namespace vcl {
     // ============================================================================
     class TForm : public TOSControl {
         INHERITED(TOSControl);
-        bool FClosed = false;
-        TNotifyEvent FOnHide;
-        TNotifyEvent FOnShow;
-        TNotifyEvent FOnClose;
     public:
         explicit TForm(TComponent* owner) : TOSControl(owner) {}
         ~TForm() override = default;
@@ -575,28 +565,20 @@ namespace vcl {
 
         TNotifyEvent& OnShow() { return FOnShow; }
         TNotifyEvent& OnHide() { return FOnHide; }
-        TNotifyEvent& OnClose() { return FOnClose; }
+        TCloseEvent& OnClose() { return FOnClose;}
 
         bool CreateFormHandlesRecursive() {
             return CreateHandlesRecursive(FHandle.get());
         }
 
-        void Show() { if (!FClosed) SetVisible(true); }
-        void Hide() { SetVisible(false); }
-
-        void Close() {
-            if (FClosed) return;
-            FClosed = true;
-            if (FOnClose) FOnClose(this);
-            SetVisible(false);
-        }
+        void Show() { inherited::SetVisible(true); }
+        void Hide() { inherited::SetVisible(false); }
 
         void OnOSEvent(OSEvent& e) override {
             switch (e.type) {
             case OSEvent::Close:
                 inherited::OnOSEvent(e);
-                if (e.cancel) return;
-                Close();
+                if (FOnClose) FOnClose(this, e.cancel);
                 return;
             case OSEvent::Show:
                 inherited::OnOSEvent(e);
@@ -666,7 +648,6 @@ namespace vcl {
             if (!FMainForm->CreateFormHandlesRecursive())
                 return 4;
 
-            FMainForm->OnClose() = [this](TObject*) { Terminate(); };
             FMainForm->Show();
 
             return FDriver->RunMessageLoop();
@@ -1328,7 +1309,6 @@ namespace vcl {
             if (!w || !w->sink) return false;
             OSEvent e;
             e.type = OSEvent::Close;
-            e.cancel = false;
             w->sink->OnOSEvent(e);
             return e.cancel;
         }
@@ -1405,12 +1385,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     form->SetCaption("Hello VCL (Win32)");
     form->SetBounds(200, 200, 480, 320);
 
-    form->OnCloseQuery() = [](TObject*, OSEvent&) -> bool {
+    form->OnClose() = [](TObject*, bool& CanClose) -> void {
         int r = MessageBoxW(nullptr,
             L"Точно закрыть приложение?",
             L"Подтверждение",
             MB_YESNO | MB_ICONQUESTION);
-        return r == IDYES;
+        CanClose = r == IDNO;
         };
 
     // --- Панель. Владеет form. ---
