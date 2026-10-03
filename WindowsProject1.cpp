@@ -302,7 +302,6 @@ namespace vcl {
         std::string FCaption;
 
         TControl* FParent = nullptr;              // визуальный, НЕ владеет
-        std::vector<TControl*> FChildControls;    // визуальные дети, НЕ владеет
 
         TNotifyEvent FOnClick;
         TNotifyEvent FOnChange;
@@ -350,25 +349,7 @@ namespace vcl {
         const std::string& Caption() const { return FCaption; }
         virtual void SetCaption(const std::string& c) { FCaption = c; }
 
-        // ЯВНЫЙ вызов. Меняет ТОЛЬКО визуальную иерархию.
-        void SetParent(TControl* p) {
-            if (FParent == p) return;
-            if (FParent) FParent->RemoveChildControl(this);
-            FParent = p;
-            if (p) p->AddChildControl(this);
-        }
         TControl* Parent() const { return FParent; }
-
-        const std::vector<TControl*>& Children() const { return FChildControls; }
-
-        void AddChildControl(TControl* c) {
-            if (c && std::find(FChildControls.begin(), FChildControls.end(), c) == FChildControls.end())
-                FChildControls.push_back(c);
-        }
-        void RemoveChildControl(TControl* c) {
-            FChildControls.erase(std::remove(FChildControls.begin(), FChildControls.end(), c),
-                FChildControls.end());
-        }
 
         TNotifyEvent& OnClick() { return FOnClick; }
         TNotifyEvent& OnChange() { return FOnChange; }
@@ -383,12 +364,6 @@ namespace vcl {
         virtual void OnPaint(TCanvas& /*Canvas*/) {}
         virtual void Invalidate() {}
 
-        virtual void PaintTree(TCanvas& c) {
-            if (!FVisible) return;
-            OnPaint(c);
-            for (auto* child : FChildControls) child->PaintTree(c);
-        }
-
         const char* ClassName() const override { return "TControl"; }
         bool InheritsFrom(const char* cls) const override {
             return std::string(cls) == "TControl" || inherited::InheritsFrom(cls);
@@ -402,6 +377,7 @@ namespace vcl {
         INHERITED(TControl);
     protected:
         std::unique_ptr<IOSHandle> FHandle;
+        std::vector<TOSControl*> FChildControls;    // дети-контролы, НЕ владеет
         IOSDriver* FDriver = nullptr;
         int        FId = 0;
 
@@ -412,6 +388,29 @@ namespace vcl {
             // Тело деструктора: this ещё валиден, подобъекты целы.
             // reset() уничтожит Win ЗДЕСЬ — ~Win сделает sink=nullptr и DestroyWindow.
             FHandle.reset();
+        }
+
+        // ЯВНЫЙ вызов. Меняет ТОЛЬКО визуальную иерархию.
+        void SetParent(TOSControl* p) {
+            if (FParent == p) return;
+            if (FParent) RemoveChildControl(this);
+            FParent = p;
+            if (p) p->AddChildControl(this);
+        }
+
+        void AddChildControl(TOSControl* c) {
+            if (c && std::find(FChildControls.begin(), FChildControls.end(), c) == FChildControls.end())
+                FChildControls.push_back(c);
+        }
+        void RemoveChildControl(TOSControl* c) {
+            FChildControls.erase(std::remove(FChildControls.begin(), FChildControls.end(), c),
+                FChildControls.end());
+        }
+
+        virtual void PaintTree(TCanvas& c) {
+            if (!FVisible) return;
+            OnPaint(c);
+            for (auto* child : FChildControls) child->PaintTree(c);
         }
 
         TOSControl(const TOSControl&) = delete;
@@ -635,7 +634,6 @@ namespace vcl {
 
             FMainForm->SetDriver(FDriver.get());
             FMainForm->DistributeDriverRecursive();
-            FMainForm->SetVisible(false);
 
             if (!FMainForm->CreateHandle(nullptr))
                 return 3;
