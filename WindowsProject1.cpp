@@ -266,7 +266,6 @@ namespace vcl {
         virtual bool Init() = 0;
         virtual void Shutdown() = 0;
         virtual int  RunMessageLoop() = 0;
-        virtual void Quit() = 0;
 
         virtual std::unique_ptr<IOSHandle>
             CreateControl(const ControlDesc& d) = 0;
@@ -1216,8 +1215,6 @@ namespace vcl {
             }
             return 0;
         }
-
-        void Quit() override { PostQuitMessage(0); }
 
         void OnPaint(HWND, Win* w, HDC dc) override {
             if (w && w->sink) {
