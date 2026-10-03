@@ -267,7 +267,7 @@ namespace vcl {
         virtual int  RunMessageLoop() = 0;
         virtual void Quit() = 0;
 
-        virtual std::unique_ptr<IOSHandle> 
+        virtual std::unique_ptr<IOSHandle>
             CreateControl(const ControlDesc& d) = 0;
 
         virtual void SetBounds(IOSHandle* h, int l, int t, int w, int ht) = 0;
@@ -292,56 +292,6 @@ namespace vcl {
 
         virtual IEventSink* SinkForHwnd(HWND h) = 0;
     };
-
-    // ============================================================================
-    //  OSDriverRegistry
-    // ============================================================================
-    class OSDriverRegistry {
-    public:
-        using Factory = IOSDriver * (*)();
-
-        static std::vector<std::pair<std::string, Factory>>& Table() {
-            static std::vector<std::pair<std::string, Factory>> t;
-            return t;
-        }
-
-        static void Register(const std::string& name, Factory f) {
-            auto& t = Table();
-            auto it = std::find_if(t.begin(), t.end(),
-                [&](auto& p) { return p.first == name; });
-            if (it != t.end()) it->second = f;
-            else t.emplace_back(name, f);
-        }
-
-        static IOSDriver* Create(const std::string& name) {
-            for (auto& p : Table())
-                if (p.first == name) return p.second();
-            return nullptr;
-        }
-
-        static IOSDriver* AutoDetect() {
-#if defined(_WIN32)
-            if (auto* d = Create("Windows")) return d;
-#endif
-            return nullptr;
-        }
-
-        static std::vector<std::string> Names() {
-            std::vector<std::string> r;
-            for (auto& p : Table()) r.push_back(p.first);
-            return r;
-        }
-    };
-
-#define REGISTER_OS_DRIVER(NAME, CLASS)                                       \
-    namespace {                                                               \
-        struct CLASS##Registrar {                                             \
-            CLASS##Registrar() {                                              \
-                ::vcl::OSDriverRegistry::Register(NAME,                       \
-                    []() -> ::vcl::IOSDriver* { return new CLASS(); });       \
-            }                                                                 \
-        } CLASS##RegistrarInstance;                                           \
-    }
 
     // ============================================================================
     //  TControl — ВИЗУАЛЬНАЯ иерархия. Владение — в TComponent.
@@ -940,17 +890,11 @@ namespace vcl {
 
         std::map<HWND, Win*> FByHwnd;
         HINSTANCE            FInst = nullptr;
-        HINSTANCE            FHInst = nullptr;
         int                  FNextId = 1000;
 
         virtual ~ITWindowsDriver() = default;
 
-        void SetHInstance(HINSTANCE h) { FHInst = h; }
-        HINSTANCE GetHInstance() const { return FInst; }
-
         bool InitWindowClasses() {
-            FInst = FHInst ? FHInst : GetModuleHandleW(nullptr);
-
             WNDCLASSEXW wc{};
             wc.cbSize = sizeof(wc);
             wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
@@ -1111,24 +1055,41 @@ namespace vcl {
 
     class TWindowsDriver : public IOSDriver, public ITWindowsDriver {
         INHERITED(IOSDriver);
+
+        // Приватный синглтон. Выставляется только конструктором.
+        inline static TWindowsDriver* s_instance = nullptr;
+
     public:
-        inline static TWindowsDriver* singleton_windows_driver = nullptr;
+        explicit TWindowsDriver(HINSTANCE hInstance) {
+            FInst = hInstance ? hInstance : GetModuleHandleW(nullptr);
+
+            if (s_instance) {
+                ShowMessage(L"TWindowsDriver: instance already exists");
+                std::terminate();
+            }
+            s_instance = this;
+        }
 
         ~TWindowsDriver() override {
             Shutdown();
+            if (s_instance == this) s_instance = nullptr;
         }
+
+        TWindowsDriver(const TWindowsDriver&) = delete;
+        TWindowsDriver& operator=(const TWindowsDriver&) = delete;
+
+        // Только чтение. Менять указатель снаружи нельзя.
+        static TWindowsDriver* Instance() { return s_instance; }
 
         const char* Name() const override { return "Windows"; }
 
         bool Init() override {
             if (!InitWindowClasses()) return false;
-            singleton_windows_driver = this;
             return true;
         }
 
         void Shutdown() override {
             UnregisterWindowClasses();
-            singleton_windows_driver = nullptr;
         }
 
         std::unique_ptr<IOSHandle> CreateControl(const ControlDesc& d) override {
@@ -1191,7 +1152,7 @@ namespace vcl {
             int ctrlId = 0;
             if (d.kind != ControlKind::Form && d.kind != ControlKind::Panel)
                 ctrlId = (d.id ? d.id : FNextId++);
-            
+
             return CreateWin(d, cls, style, exStyle, parent, x, y, ww, hh, ctrlId);
         }
 
@@ -1410,8 +1371,6 @@ namespace vcl {
         }
     };
 
-    REGISTER_OS_DRIVER("Windows", TWindowsDriver);
-
 #endif // _WIN32
 
 } // namespace vcl
@@ -1426,23 +1385,19 @@ namespace vcl {
 //   * label — new TLabel(panel). Владение — у panel.
 //   * button/chk/combo/edit — new T*(form). Владение — у form.
 //   * SetParent — визуальная иерархия, ЯВНО.
+//
+//  ДРАЙВЕР:
+//   * Создаётся напрямую: std::make_unique<TWindowsDriver>(hInstance).
+//   * hInstance передаётся в конструктор. Никаких SetHInstance снаружи.
+//   * Синглтон TWindowsDriver::Instance() выставляется в конструкторе.
 // ============================================================================
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     using namespace vcl;
 
-    IOSDriver* drv = OSDriverRegistry::AutoDetect();
-    if (!drv) {
-        MessageBoxW(nullptr, L"Не найден драйвер", L"Ошибка", MB_ICONERROR);
-        return 1;
-    }
-
-    if (auto* wdrv = dynamic_cast<TWindowsDriver*>(drv)) {
-        wdrv->SetHInstance(hInstance);
-        TWindowsDriver::singleton_windows_driver = wdrv;
-    }
+    auto driver = std::make_unique<TWindowsDriver>(hInstance);
 
     TApplication app(nullptr);
-    app.SetDriver(std::unique_ptr<IOSDriver>(drv));
+    app.SetDriver(std::move(driver));
     app.SetTitle("VCL Demo");
 
     // --- Главная форма. Владеет app. ---
