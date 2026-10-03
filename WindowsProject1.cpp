@@ -283,15 +283,10 @@ namespace vcl {
         virtual void AddString(IOSHandle* h, const std::string& s) = 0;
         virtual void SetSel(IOSHandle* h, int idx) = 0;
         virtual int  GetSel(IOSHandle* h) const = 0;
-
         virtual void SetEventSink(IOSHandle* h, IEventSink* sink) = 0;
-        virtual IEventSink* SinkFor(IOSHandle* h) = 0;
-
         virtual std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h,
             HDC dc = nullptr,
             bool ownsDC = false) = 0;
-
-        virtual IEventSink* SinkForHwnd(HWND h) = 0;
     };
 
     // ============================================================================
@@ -1215,12 +1210,7 @@ namespace vcl {
             if (auto* w = static_cast<Win*>(h)) w->sink = sink;
         }
 
-        IEventSink* SinkFor(IOSHandle* h) override {
-            auto* w = static_cast<Win*>(h);
-            return w ? w->sink : nullptr;
-        }
-
-        IEventSink* SinkForHwnd(HWND h) override {
+        IEventSink* SinkForHwnd(HWND h) {
             auto it = FByHwnd.find(h);
             return it == FByHwnd.end() ? nullptr : it->second->sink;
         }
