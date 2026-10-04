@@ -738,10 +738,10 @@ namespace vcl {
     //     драйвер гарантированно умирал бы раньше дерева HWND.
     //   * Типичная схема (см. wWinMain):
     //         auto driver = std::make_unique<TWindowsDriver>(hInstance);
-    //         TApplication app(nullptr);
-    //         app.SetDriver(driver.get());   // НЕ владеет
+    //         auto app = std::make_unique<TApplication>(nullptr);
+    //         app->SetDriver(driver.get());   // НЕ владеет
     //         ... форма и дети ...
-    //         return app.Run();
+    //         return app->Run();
     //     Здесь driver объявлен ДО app, значит умрёт ПОСЛЕ app и его дерева.
     //
     //  ГАРАНТИЯ ПОРЯДКА:
@@ -1397,9 +1397,9 @@ public:
 //
 //     auto driver = std::make_unique<TWindowsDriver>(hInstance);  // 1-й
 //     TApplication app(nullptr);                                  // 2-й
-//     app.SetDriver(driver.get());                                // не владеет
+//     app->SetDriver(driver.get());                                // не владеет
 //     ...
-//     return app.Run();
+//     return app->Run();
 //
 //  На выходе из wWinMain локальные объекты разрушаются в ОБРАТНОМ порядке
 //  объявления:
@@ -1411,7 +1411,7 @@ public:
 //
 //  ВЛАДЕНИЕ (без изменений):
 //   * app (TApplication : TComponent) владеет формой и всем поддеревом.
-//   * form — new TForm(&app). Владение — у app.
+//   * form — new TForm(&app). Владение — у app->
 //   * panel — new TPanel(form). Владение — у form.
 //   * label — new TLabel(panel). Владение — у panel.
 //   * button/chk/combo/edit — new T*(form). Владение — у form.
@@ -1435,12 +1435,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
 
     // 2. Приложение создаётся ВТОРЫМ — значит, умрёт ПЕРВЫМ,
     //    вместе со всем деревом HWND.
-    TApplication app(nullptr);
-    app.SetDriver(driver.get());   // НЕ владеет; driver живёт дольше app
-    app.SetTitle("VCL Demo");
+    auto app = std::make_unique<TApplication>(nullptr);
+    app->SetDriver(driver.get());   // НЕ владеет; driver живёт дольше app
+    app->SetTitle("VCL Demo");
 
     // --- Главная форма. Владеет app. ---
-    auto* form = new TForm(&app);
+    auto* form = new TForm(app.get());
     form->SetCaption("Hello VCL (Win32)");
     form->SetBounds(200, 200, 480, 320);
 
@@ -1501,6 +1501,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
         (void)s;
         };
 
-    app.SetMainForm(form);
-    return app.Run();
+    app->SetMainForm(form);
+    return app->Run();
 }
