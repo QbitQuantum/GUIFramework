@@ -258,21 +258,21 @@ namespace vcl {
     //  IOSDriver
     // ============================================================================
     class IOSDriver {
+    protected:
+        // Избыточно, потому что все и так делается констукторе/деструкторе
+        // Можно просто удалить, либо использоать как явный контракт
+        virtual void Init() = 0;
+        virtual void Shutdown() = 0;
     public:
         virtual ~IOSDriver() = default;
 
-        virtual const char* Name() const = 0;
-
-        virtual bool Init() = 0;
-        virtual void Shutdown() = 0;
-        virtual int  RunMessageLoop() = 0;
-
         virtual std::unique_ptr<IOSHandle>
             CreateControl(const ControlDesc& d) = 0;
-
         virtual std::unique_ptr<TCanvas> 
             CreateCanvas(IOSHandle* h) = 0;
 
+        virtual const char* Name() const = 0;
+        virtual int  RunMessageLoop() = 0;
         virtual void SetBounds(IOSHandle* h, int l, int t, int w, int ht) = 0;
         virtual void SetVisible(IOSHandle* h, bool v) = 0;
         virtual void SetText(IOSHandle* h, const std::string& text) = 0;
@@ -398,7 +398,7 @@ namespace vcl {
         ~TOSControl() override {
             // Тело деструктора: this ещё валиден, подобъекты целы.
             // reset() уничтожит Win ЗДЕСЬ — ~Win сделает sink=nullptr и DestroyWindow.
-            FHandle.reset();
+            // Вызывать его явно не нужно. Он вызвется автоматически
         }
 
         // ЯВНЫЙ вызов. Меняет ТОЛЬКО визуальную иерархию.
@@ -743,7 +743,6 @@ namespace vcl {
         ~TApplication() override {
             // Сначала драйвер: окна умрут, sink-и обнулятся.
             // Потом ~TComponent удалит форму и всех детей.
-            if (FDriver) FDriver->Shutdown();
         }
 
         void SetDriver(std::unique_ptr<IOSDriver> d) { FDriver = std::move(d); }
@@ -762,10 +761,6 @@ namespace vcl {
             if (!FMainForm) {
                 std::cerr << "[TApplication] No main form!\n";
                 return 1;
-            }
-            if (!FDriver->Init()) {
-                std::cerr << "[TApplication] Driver Init() failed!\n";
-                return 2;
             }
 
             FMainForm->SetDriver(FDriver.get());
@@ -862,7 +857,7 @@ namespace vcl {
 
         virtual ~ITWindowsDriver() = default;
 
-        bool InitWindowClasses() {
+        void InitWindowClasses() {
             WNDCLASSEXW wc{};
             wc.cbSize = sizeof(wc);
             wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
@@ -873,7 +868,7 @@ namespace vcl {
             wc.lpszClassName = L"VCLFormClass";
             if (!RegisterClassExW(&wc) &&
                 GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-                return false;
+                return;
             }
 
             WNDCLASSEXW wc2 = wc;
@@ -881,15 +876,7 @@ namespace vcl {
             wc2.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
             if (!RegisterClassExW(&wc2) &&
                 GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-                return false;
-            }
-            return true;
-        }
-
-        void UnregisterWindowClasses() {
-            if (FInst) {
-                UnregisterClassW(L"VCLFormClass", FInst);
-                UnregisterClassW(L"VCLPanelClass", FInst);
+                return;
             }
         }
 
@@ -1030,17 +1017,14 @@ namespace vcl {
     public:
         explicit TWindowsDriver(HINSTANCE hInstance) {
             FInst = hInstance ? hInstance : GetModuleHandleW(nullptr);
-
-            if (s_instance) {
-                ShowMessage(L"TWindowsDriver: instance already exists");
-                std::terminate();
-            }
-            s_instance = this;
+            Init();
         }
 
         ~TWindowsDriver() override {
+            // Shutdown() больше не снимает оконный класс (UnregisterClassW) — только s_instance = nullptr
+            // Значит, зависимости «форма должна умереть раньше драйвера» больше нет
+            // Порядок разрушения перестал быть критичным
             Shutdown();
-            if (s_instance == this) s_instance = nullptr;
         }
 
         TWindowsDriver(const TWindowsDriver&) = delete;
@@ -1051,13 +1035,17 @@ namespace vcl {
 
         const char* Name() const override { return "Windows"; }
 
-        bool Init() override {
-            if (!InitWindowClasses()) return false;
-            return true;
+        void Init() override {
+            if (s_instance) {
+                ShowMessage(L"TWindowsDriver: instance already exists");
+                std::terminate();
+            }
+            s_instance = this;
+            InitWindowClasses();
         }
 
         void Shutdown() override {
-            UnregisterWindowClasses();
+            if (s_instance == this) s_instance = nullptr;
         }
 
         std::unique_ptr<IOSHandle> CreateControl(const ControlDesc& d) override {
