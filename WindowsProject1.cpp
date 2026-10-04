@@ -36,6 +36,7 @@
 #include <cstdint>
 #include <iostream>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <sstream>
 
@@ -88,7 +89,7 @@ namespace vcl {
         return s;
     }
 
-    void ShowMessage(const wchar_t* msg)
+    inline void ShowMessage(const wchar_t* msg)
     {
         MessageBoxW(nullptr, msg, L"Ошибка", MB_ICONERROR);
     }
@@ -259,8 +260,8 @@ namespace vcl {
     // ============================================================================
     class IOSDriver {
     protected:
-        // Избыточно, потому что все и так делается констукторе/деструкторе
-        // Можно просто удалить, либо использоать как явный контракт
+        // Избыточно, потому что вс и так делается в конструкторе/деструкторе.
+        // Можно просто удалить, либо использовать как явный контракт.
         virtual void Init() = 0;
         virtual void Shutdown() = 0;
     public:
@@ -268,7 +269,7 @@ namespace vcl {
 
         virtual std::unique_ptr<IOSHandle>
             CreateControl(const ControlDesc& d) = 0;
-        virtual std::unique_ptr<TCanvas> 
+        virtual std::unique_ptr<TCanvas>
             CreateCanvas(IOSHandle* h) = 0;
 
         virtual const char* Name() const = 0;
@@ -396,9 +397,8 @@ namespace vcl {
         explicit TOSControl(TComponent* owner) : TControl(owner) {}
 
         ~TOSControl() override {
-            // Тело деструктора: this ещё валиден, подобъекты целы.
-            // reset() уничтожит Win ЗДЕСЬ — ~Win сделает sink=nullptr и DestroyWindow.
-            // Вызывать его явно не нужно. Он вызвется автоматически
+            // FHandle — unique_ptr, его деструктор сам вызовет ~Win -> DestroyWindow.
+            // Явный reset() не нужен.
         }
 
         // ЯВНЫЙ вызов. Меняет ТОЛЬКО визуальную иерархию.
@@ -553,14 +553,14 @@ namespace vcl {
     class TForm : public TCustomForm {
         INHERITED(TCustomForm);
     public:
-        explicit TForm(TComponent* owner) : TCustomForm(owner) { }
+        explicit TForm(TComponent* owner) : TCustomForm(owner) {}
         ~TForm() override = default;
 
         ControlKind Kind() const override { return ControlKind::Form; }
 
         TNotifyEvent& OnShow() { return FOnShow; }
         TNotifyEvent& OnHide() { return FOnHide; }
-        TCloseEvent& OnClose() { return FOnClose;}
+        TCloseEvent& OnClose() { return FOnClose; }
 
         void CreateHandle() {
             inherited::CreateHandle(nullptr);
@@ -705,6 +705,7 @@ namespace vcl {
 
         void CreateHandle(IOSHandle* parentHandle) override {
             inherited::CreateHandle(parentHandle);
+            if (!FHandle) return;
             FUpdating = true;
             for (auto& s : FPending) FDriver->AddString(FHandle.get(), s);
             if (!FPending.empty()) FDriver->SetSel(FHandle.get(), 0);
@@ -743,8 +744,9 @@ namespace vcl {
     public:
         TApplication(TComponent* owner) : TComponent(owner) {}
         ~TApplication() override {
-            // Сначала драйвер: окна умрут, sink-и обнулятся.
-            // Потом ~TComponent удалит форму и всех детей.
+            // Драйвер — член, умрёт после тела ~TApplication().
+            // Дерево формы — в базе ~TComponent, умрёт ещё позже.
+            // Порядок неважен: классы окон не снимаются (Shutdown их не трогает).
         }
 
         void SetDriver(std::unique_ptr<IOSDriver> d) { FDriver = std::move(d); }
@@ -776,6 +778,7 @@ namespace vcl {
             return FDriver->RunMessageLoop();
         }
     };
+
     // ============================================================================
     //  Windows-драйвер
     // ============================================================================
@@ -791,8 +794,8 @@ namespace vcl {
         COLORREF FColor = RGB(0, 0, 0);
 
     public:
-        TWindowsCanvas(HWND hwnd) : FHwnd(hwnd), FDc(wil::GetDC(hwnd)) { }
-        ~TWindowsCanvas() override { }
+        TWindowsCanvas(HWND hwnd) : FHwnd(hwnd), FDc(wil::GetDC(hwnd)) {}
+        ~TWindowsCanvas() override {}
 
         void SetColor(TColor c) override {
             FColor = RGB(c.r, c.g, c.b);
@@ -853,13 +856,19 @@ namespace vcl {
             }
         };
 
-        std::map<HWND, Win*> FByHwnd;
-        HINSTANCE            FInst = nullptr;
-        int                  FNextId = 1000;
+        std::map<HWND, Win*>   FByHwnd;
+        std::set<std::wstring> FRegisteredClasses;
+        HINSTANCE              FInst = nullptr;
+        int                    FNextId = 1000;
 
         virtual ~ITWindowsDriver() = default;
 
-        void InitWindowClasses() {
+        // Ленивая идемпотентная регистрация класса окна.
+        // Вызывается из CreateControl перед CreateWindowExW.
+        void EnsureClass(const wchar_t* cls) {
+            if (!cls) return;
+            if (FRegisteredClasses.count(cls)) return;
+
             WNDCLASSEXW wc{};
             wc.cbSize = sizeof(wc);
             wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
@@ -867,19 +876,14 @@ namespace vcl {
             wc.hInstance = FInst;
             wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
             wc.hbrBackground = nullptr;
-            wc.lpszClassName = L"VCLFormClass";
+            wc.lpszClassName = cls;
+
             if (!RegisterClassExW(&wc) &&
                 GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-                return;
+                return;   // не зарегистрировали — CreateWindowExW вернёт nullptr
             }
 
-            WNDCLASSEXW wc2 = wc;
-            wc2.lpszClassName = L"VCLPanelClass";
-            wc2.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-            if (!RegisterClassExW(&wc2) &&
-                GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-                return;
-            }
+            FRegisteredClasses.insert(cls);
         }
 
         std::unique_ptr<Win> CreateWin(const ControlDesc& d,
@@ -1023,9 +1027,6 @@ namespace vcl {
         }
 
         ~TWindowsDriver() override {
-            // Shutdown() больше не снимает оконный класс (UnregisterClassW) — только s_instance = nullptr
-            // Значит, зависимости «форма должна умереть раньше драйвера» больше нет
-            // Порядок разрушения перестал быть критичным
             Shutdown();
         }
 
@@ -1043,7 +1044,7 @@ namespace vcl {
                 std::terminate();
             }
             s_instance = this;
-            InitWindowClasses();
+            // Регистрация классов — ленивая, в CreateControl через EnsureClass.
         }
 
         void Shutdown() override {
@@ -1060,10 +1061,12 @@ namespace vcl {
             case ControlKind::Form:
                 cls = L"VCLFormClass";
                 style = WS_OVERLAPPEDWINDOW;
+                EnsureClass(cls);
                 break;
             case ControlKind::Panel:
                 cls = L"VCLPanelClass";
                 style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+                EnsureClass(cls);
                 break;
             case ControlKind::Label:
                 cls = L"STATIC";
@@ -1325,6 +1328,7 @@ namespace vcl {
 //   * Создаётся напрямую: std::make_unique<TWindowsDriver>(hInstance).
 //   * hInstance передаётся в конструктор. Никаких SetHInstance снаружи.
 //   * Синглтон TWindowsDriver::Instance() выставляется в конструкторе.
+//   * Регистрация классов окон — ленивая, в CreateControl через EnsureClass.
 // ============================================================================
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     using namespace vcl;
