@@ -571,8 +571,10 @@ namespace vcl {
         void Hide() { inherited::SetVisible(false); }
 
         void PaintTree(TCanvas* c) override {
+            // Базовый пример
             if (!c) return;
             c->Line(0, 0, 400, 400);
+            inherited::PaintTree(c);
         }
 
         void OnOSEvent(OSEvent& e) override {
