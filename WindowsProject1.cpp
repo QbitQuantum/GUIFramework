@@ -12,6 +12,14 @@
 //   6. SetParent(TControl*) — визуальная иерархия, отдельно от владения.
 //   7. RemoveComponent нет. Отцепления в ~TComponent нет. Дети удаляются
 //      автоматически при разрушении FOwnedComponents.
+//
+//  КОНТРАКТ ДРАЙВЕРА (Win32):
+//   * Драйвер — синглтон. Указатель живёт в БАЗЕ ITWindowsDriver::s_instance.
+//   * Наследник (TWindowsDriver) в Init() пишет s_instance = this,
+//     в Shutdown() — сбрасывает, если он же и стоит.
+//   * WndProc (статик базы) читает s_instance напрямую — без forward-decl
+//     на наследника и без Win::owner.
+//   * Win хранит только то, что уникально для окна: hwnd, sink, kind, id.
 // ============================================================================
 #pragma once
 
@@ -46,15 +54,6 @@
 //  Переключатель VCL_USE_TYPEDEF_INHERITED:
 //    1 — typedef Base inherited;   (стиль C++ Builder / VCL)
 //    0 — using inherited = Base;   (современный C++)
-//
-//  Использование:
-//      class TControl : public TComponent {
-//          INHERITED(TComponent);
-//          ...
-//      };
-//
-//  Тогда в методах:
-//      inherited::SetBounds(...);   // = TComponent::SetBounds(...)
 // ============================================================================
 #define VCL_USE_TYPEDEF_INHERITED 1
 
@@ -384,7 +383,7 @@ namespace vcl {
 
         void AddChildControl(TOSControl* c) {
             if (!c) return;
-            if (std::find(FChildControls.begin(), 
+            if (std::find(FChildControls.begin(),
                 FChildControls.end(), c) != FChildControls.end())
                 return;
             FChildControls.push_back(c);
@@ -852,7 +851,6 @@ namespace vcl {
         struct Win : IOSHandle {
             wil::unique_hwnd hwnd;
             IEventSink* sink = nullptr;
-            ITWindowsDriver* owner = nullptr;
             ControlKind      kind = ControlKind::Panel;
             int              id = 0;
             bool             isForm = false;
@@ -861,6 +859,12 @@ namespace vcl {
                 sink = nullptr;
             }
         };
+
+        // Синглтон драйвера. Живёт в БАЗЕ: WndProc статик, ему нужен
+        // прямой доступ без forward-declaration на наследника.
+        inline static ITWindowsDriver* s_instance = nullptr;
+
+        static ITWindowsDriver* Instance() { return s_instance; }
 
         std::map<HWND, Win*>   FByHwnd;
         std::set<std::wstring> FRegisteredClasses;
@@ -903,7 +907,6 @@ namespace vcl {
             win->kind = d.kind;
             win->id = d.id;
             win->isForm = (d.kind == ControlKind::Form);
-            win->owner = this;
             win->hwnd.reset(::CreateWindowExW(
                 exStyle, cls, Utf8ToW(d.caption).c_str(), style,
                 x, y, w, h, parent, (HMENU)(INT_PTR)ctrlId,
@@ -929,8 +932,10 @@ namespace vcl {
         virtual void OnKeyUp(HWND, Win*, int) {}
 
         static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+            // Драйвер — синглтон базы. Никаких forward-decl на TWindowsDriver.
+            ITWindowsDriver* drv = s_instance;
+            if (!drv) return DefWindowProcW(hwnd, msg, wp, lp);
             Win* w = nullptr;
-
             if (msg == WM_NCCREATE) {
                 auto* cs = reinterpret_cast<CREATESTRUCTW*>(lp);
                 w = static_cast<Win*>(cs->lpCreateParams);
@@ -939,9 +944,6 @@ namespace vcl {
             else {
                 w = reinterpret_cast<Win*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
             }
-
-            ITWindowsDriver* drv = w ? w->owner : nullptr;
-            if (!drv) return DefWindowProcW(hwnd, msg, wp, lp);
 
             switch (msg) {
             case WM_COMMAND:
@@ -1019,9 +1021,6 @@ namespace vcl {
     class TWindowsDriver : public IOSDriver, public ITWindowsDriver {
         INHERITED(IOSDriver);
 
-        // Приватный синглтон. Выставляется только конструктором.
-        inline static TWindowsDriver* s_instance = nullptr;
-
     public:
         explicit TWindowsDriver(HINSTANCE hInstance) {
             FInst = hInstance ? hInstance : GetModuleHandleW(nullptr);
@@ -1035,9 +1034,6 @@ namespace vcl {
         TWindowsDriver(const TWindowsDriver&) = delete;
         TWindowsDriver& operator=(const TWindowsDriver&) = delete;
 
-        // Только чтение. Менять указатель снаружи нельзя.
-        static TWindowsDriver* Instance() { return s_instance; }
-
         const char* Name() const override { return "Windows"; }
 
         void Init() override {
@@ -1045,7 +1041,7 @@ namespace vcl {
                 ShowMessage(L"TWindowsDriver: instance already exists");
                 std::terminate();
             }
-            s_instance = this;
+            s_instance = this;   // база хранит, наследник выставляет
             // Регистрация классов — ленивая, в CreateControl через EnsureClass.
         }
 
@@ -1332,7 +1328,8 @@ namespace vcl {
 //  ДРАЙВЕР:
 //   * Создаётся напрямую: std::make_unique<TWindowsDriver>(hInstance).
 //   * hInstance передаётся в конструктор. Никаких SetHInstance снаружи.
-//   * Синглтон TWindowsDriver::Instance() выставляется в конструкторе.
+//   * Синглтон живёт в базе ITWindowsDriver::s_instance.
+//     TWindowsDriver::Init() выставляет его, Shutdown() — сбрасывает.
 //   * Регистрация классов окон — ленивая, в CreateControl через EnsureClass.
 // ============================================================================
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
