@@ -1231,22 +1231,6 @@ namespace vcl {
             }
         }
 
-        void OnPaint(HWND, Win* w, HDC dc) override {
-            if (w && w->sink) {
-                OSEvent e; e.type = OSEvent::Paint;
-                w->sink->OnOSEvent(e);
-            }
-        }
-
-        template <class F>
-        static void Emit(Win* w, OSEvent::Type type, F&& setup) {
-            if (!w || !w->sink) return;
-            OSEvent e;
-            e.type = type;
-            setup(e);
-            w->sink->OnOSEvent(e);
-        }
-
         bool OnEraseBackground(HWND hwnd, Win* w, HDC dc) override {
             if (!w || (w->kind != ControlKind::Panel &&
                 w->kind != ControlKind::Form)) {
@@ -1261,12 +1245,25 @@ namespace vcl {
             return true;
         }
 
+        template <class F>
+        static void Emit(Win* w, OSEvent::Type type, F&& setup) {
+            if (!w || !w->sink) return;
+            OSEvent e;
+            e.type = type;
+            setup(e);
+            w->sink->OnOSEvent(e);
+        }
+
         bool OnClose(HWND, Win* w) override {
             if (!w || !w->sink) return false;
             OSEvent e;
             e.type = OSEvent::Close;
             w->sink->OnOSEvent(e);
             return e.cancel;
+        }
+
+        void OnPaint(HWND, Win* w, HDC dc) override {
+            Emit(w, OSEvent::Paint, [](OSEvent&) {});
         }
 
         void OnShowWindow(HWND, Win* w, BOOL shown) override {
