@@ -1,18 +1,5 @@
 ﻿#pragma once
 
-#include "include/wil/resource.h"
-
-#ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#  define NOMINMAX
-#endif
-#include <windows.h>
-#include <windowsx.h>
-#undef min
-#undef max
-
 #include <string>
 #include <vector>
 #include <memory>
@@ -45,31 +32,6 @@
 //  vcl namespace
 // ============================================================================
 namespace vcl {
-
-    // ---------------------------------------------------------------------------
-    //  UTF-8 <-> UTF-16 helpers
-    // ---------------------------------------------------------------------------
-    inline std::wstring Utf8ToW(const std::string& s) {
-        if (s.empty()) return {};
-        int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
-        std::wstring w(n, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
-        return w;
-    }
-    inline std::string WToUtf8(const std::wstring& w) {
-        if (w.empty()) return {};
-        int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(),
-            nullptr, 0, nullptr, nullptr);
-        std::string s(n, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(),
-            &s[0], n, nullptr, nullptr);
-        return s;
-    }
-
-    inline void ShowMessage(const wchar_t* msg)
-    {
-        MessageBoxW(nullptr, msg, L"Ошибка", MB_ICONERROR);
-    }
 
     // ============================================================================
     //  TObject
@@ -827,539 +789,578 @@ namespace vcl {
         }
     };
 
+} // namespace vcl
+
     // ============================================================================
     //  Windows-драйвер
     // ============================================================================
 #if defined(_WIN32)
 
-    class TWindowsCanvas : public TCanvas {
-        INHERITED(TCanvas);
-        HWND     FHwnd = nullptr;
+#include "include/wil/resource.h"
 
-        wil::unique_hdc_window FDc;
-        wil::unique_hbrush FBrush;
-        wil::unique_hpen   FPen;
-        COLORREF FColor = RGB(0, 0, 0);
+#ifndef WIN32_LEAN_AND_MEAN
+#  define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#  define NOMINMAX
+#endif
+#include <windows.h>
+#include <windowsx.h>
+#undef min
+#undef max
 
-    public:
-        TWindowsCanvas(HWND hwnd) : FHwnd(hwnd), FDc(wil::GetDC(hwnd)) {}
-        ~TWindowsCanvas() override {}
+using namespace vcl;
 
-        void SetColor(TColor c) override {
-            FColor = RGB(c.r, c.g, c.b);
-            FBrush.reset(CreateSolidBrush(FColor));
-            FPen.reset(CreatePen(PS_SOLID, 1, FColor));
-        }
+// ---------------------------------------------------------------------------
+//  UTF-8 <-> UTF-16 helpers
+// ---------------------------------------------------------------------------
+inline std::wstring Utf8ToW(const std::string& s) {
+    if (s.empty()) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+    std::wstring w(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
+    return w;
+}
+inline std::string WToUtf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(),
+        nullptr, 0, nullptr, nullptr);
+    std::string s(n, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(),
+        &s[0], n, nullptr, nullptr);
+    return s;
+}
 
-        void FillRect(int l, int t, int w, int h) override {
-            RECT r{ l, t, l + w, t + h };
-            HBRUSH b = FBrush ? FBrush.get() : (HBRUSH)GetStockObject(BLACK_BRUSH);
-            ::FillRect(FDc.get(), &r, b);
-        }
+inline void ShowMessage(const wchar_t* msg)
+{
+    MessageBoxW(nullptr, msg, L"Ошибка", MB_ICONERROR);
+}
 
-        void DrawRect(int l, int t, int w, int h) override {
-            HBRUSH oldB = (HBRUSH)SelectObject(FDc.get(), GetStockObject(NULL_BRUSH));
-            HPEN   oldP = (HPEN)SelectObject(FDc.get(), FPen ? FPen.get()
-                : GetStockObject(BLACK_PEN));
-            ::Rectangle(FDc.get(), l, t, l + w, t + h);
-            SelectObject(FDc.get(), oldB);
-            SelectObject(FDc.get(), oldP);
-        }
+class TWindowsCanvas : public TCanvas {
+    INHERITED(TCanvas);
+    HWND     FHwnd = nullptr;
 
-        void DrawTextOut(int x, int y, const std::string& text) override {
-            SetTextColor(FDc.get(), FColor);
-            SetBkMode(FDc.get(), TRANSPARENT);
-            std::wstring w = Utf8ToW(text);
-            ::TextOutW(FDc.get(), x, y, w.c_str(), (int)w.size());
-        }
+    wil::unique_hdc_window FDc;
+    wil::unique_hbrush FBrush;
+    wil::unique_hpen   FPen;
+    COLORREF FColor = RGB(0, 0, 0);
 
-        void Line(int x1, int y1, int x2, int y2) override {
-            HPEN oldP = (HPEN)SelectObject(FDc.get(), FPen ? FPen.get()
-                : GetStockObject(BLACK_PEN));
-            MoveToEx(FDc.get(), x1, y1, nullptr);
-            ::LineTo(FDc.get(), x2, y2);
-            SelectObject(FDc.get(), oldP);
-        }
+public:
+    TWindowsCanvas(HWND hwnd) : FHwnd(hwnd), FDc(wil::GetDC(hwnd)) {}
+    ~TWindowsCanvas() override {}
 
-        void Clear(TColor c) override {
-            RECT r;
-            GetClientRect(FHwnd, &r);
-            wil::unique_hbrush b(CreateSolidBrush(RGB(c.r, c.g, c.b)));
-            ::FillRect(FDc.get(), &r, b.get());
-        }
-    };
+    void SetColor(TColor c) override {
+        FColor = RGB(c.r, c.g, c.b);
+        FBrush.reset(CreateSolidBrush(FColor));
+        FPen.reset(CreatePen(PS_SOLID, 1, FColor));
+    }
 
-    class ITWindowsDriver {
-    public:
-        struct Win : IOSHandle {
-            wil::unique_hwnd hwnd;
-            ITWindowsDriver* driver = nullptr;
-            IEventSink* sink = nullptr;
-            ControlKind      kind = ControlKind::Panel;
-            int              id = 0;
-            bool             isForm = false;
+    void FillRect(int l, int t, int w, int h) override {
+        RECT r{ l, t, l + w, t + h };
+        HBRUSH b = FBrush ? FBrush.get() : (HBRUSH)GetStockObject(BLACK_BRUSH);
+        ::FillRect(FDc.get(), &r, b);
+    }
 
-            ~Win() override {
-                sink = nullptr;
-            }
-        };
+    void DrawRect(int l, int t, int w, int h) override {
+        HBRUSH oldB = (HBRUSH)SelectObject(FDc.get(), GetStockObject(NULL_BRUSH));
+        HPEN   oldP = (HPEN)SelectObject(FDc.get(), FPen ? FPen.get()
+            : GetStockObject(BLACK_PEN));
+        ::Rectangle(FDc.get(), l, t, l + w, t + h);
+        SelectObject(FDc.get(), oldB);
+        SelectObject(FDc.get(), oldP);
+    }
 
-        std::set<std::wstring> FRegisteredClasses;
-        HINSTANCE              FInst = nullptr;
-        int                    FNextId = 1000;
+    void DrawTextOut(int x, int y, const std::string& text) override {
+        SetTextColor(FDc.get(), FColor);
+        SetBkMode(FDc.get(), TRANSPARENT);
+        std::wstring w = Utf8ToW(text);
+        ::TextOutW(FDc.get(), x, y, w.c_str(), (int)w.size());
+    }
 
-        virtual ~ITWindowsDriver() = default;
+    void Line(int x1, int y1, int x2, int y2) override {
+        HPEN oldP = (HPEN)SelectObject(FDc.get(), FPen ? FPen.get()
+            : GetStockObject(BLACK_PEN));
+        MoveToEx(FDc.get(), x1, y1, nullptr);
+        ::LineTo(FDc.get(), x2, y2);
+        SelectObject(FDc.get(), oldP);
+    }
 
-        // ------------------------------------------------------------------
-        //  GWLP_USERDATA — единственный индекс HWND -> Win*.
-        //  Пишется ЯВНО в CreateWin (не из WM_NCCREATE!): для системных
-        //  контролов (BUTTON, EDIT, COMBOBOX) наш WndProc не вызывается,
-        //  и запись из WM_NCCREATE для них не сработала бы.
-        //  Читается только в WinOf. Больше нигде.
-        // ------------------------------------------------------------------
-        static void AttachWin(HWND hwnd, Win* w) {
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)w);
-        }
-        static Win* WinOf(HWND hwnd) {
-            return reinterpret_cast<Win*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-        }
+    void Clear(TColor c) override {
+        RECT r;
+        GetClientRect(FHwnd, &r);
+        wil::unique_hbrush b(CreateSolidBrush(RGB(c.r, c.g, c.b)));
+        ::FillRect(FDc.get(), &r, b.get());
+    }
+};
 
-        void EnsureClass(const wchar_t* cls) {
-            if (!cls) return;
-            if (FRegisteredClasses.count(cls)) return;
+class ITWindowsDriver {
+public:
+    struct Win : IOSHandle {
+        wil::unique_hwnd hwnd;
+        ITWindowsDriver* driver = nullptr;
+        IEventSink* sink = nullptr;
+        ControlKind      kind = ControlKind::Panel;
+        int              id = 0;
+        bool             isForm = false;
 
-            WNDCLASSEXW wc{};
-            wc.cbSize = sizeof(wc);
-            wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
-            wc.lpfnWndProc = &ITWindowsDriver::WndProc;
-            wc.hInstance = FInst;
-            wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-            wc.hbrBackground = nullptr;
-            wc.lpszClassName = cls;
-
-            if (!RegisterClassExW(&wc) &&
-                GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-                return;
-            }
-
-            FRegisteredClasses.insert(cls);
-        }
-
-        std::unique_ptr<Win> CreateWin(const ControlDesc& d,
-            const wchar_t* cls,
-            DWORD style, DWORD exStyle,
-            HWND parent,
-            int x, int y, int w, int h,
-            int ctrlId)
-        {
-            auto win = std::make_unique<Win>();
-            win->driver = this;
-            win->kind = d.kind;
-            win->id = d.id;
-            win->isForm = (d.kind == ControlKind::Form);
-
-            win->hwnd.reset(::CreateWindowExW(
-                exStyle, cls, Utf8ToW(d.caption).c_str(), style,
-                x, y, w, h, parent, (HMENU)(INT_PTR)ctrlId,
-                FInst, nullptr));
-
-            if (!win->hwnd) return nullptr;
-
-            AttachWin(win->hwnd.get(), win.get());
-            return win;
-        }
-
-        virtual void OnCommand(HWND, Win*, WORD, HWND, WORD) {}
-        virtual void OnPaint(HWND, Win*, HDC) {}
-        virtual bool OnEraseBackground(HWND, Win*, HDC) { return false; }
-        virtual void OnShowWindow(HWND, Win*, BOOL) {}
-        virtual bool OnClose(HWND, Win*) { return false; }
-        virtual void OnSize(HWND, Win*, int, int) {}
-        virtual void OnMove(HWND, Win*, int, int) {}
-        virtual void OnMouseDown(HWND, Win*, int, int, int) {}
-        virtual void OnMouseUp(HWND, Win*, int, int, int) {}
-        virtual void OnMouseMove(HWND, Win*, int, int) {}
-        virtual void OnKeyDown(HWND, Win*, int) {}
-        virtual void OnKeyUp(HWND, Win*, int) {}
-
-        static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-            Win* w = WinOf(hwnd);
-            if (!w || !w->driver) return DefWindowProcW(hwnd, msg, wp, lp);
-
-            ITWindowsDriver* drv = w->driver;
-
-            switch (msg) {
-            case WM_COMMAND:
-                drv->OnCommand(hwnd, w, HIWORD(wp), (HWND)lp, LOWORD(wp));
-                return 0;
-
-            case WM_PAINT: {
-                PAINTSTRUCT ps;
-                wil::unique_hdc_paint hdc = wil::BeginPaint(hwnd, &ps);
-                drv->OnPaint(hwnd, w, hdc.get());
-                return 0;
-            }
-
-            case WM_ERASEBKGND:
-                if (drv->OnEraseBackground(hwnd, w, (HDC)wp)) return 1;
-                break;
-
-            case WM_SHOWWINDOW:
-                drv->OnShowWindow(hwnd, w, (BOOL)wp);
-                return 0;
-
-            case WM_CLOSE:
-                if (drv->OnClose(hwnd, w)) return 0;
-                break;
-
-            case WM_DESTROY:
-                if (!GetParent(hwnd)) PostQuitMessage(0);
-                return 0;
-
-            case WM_NCDESTROY:
-                if (w) {
-                    AttachWin(hwnd, nullptr);
-                    w->hwnd.release();
-                }
-                return DefWindowProcW(hwnd, msg, wp, lp);
-
-            case WM_SIZE:
-                drv->OnSize(hwnd, w, LOWORD(lp), HIWORD(lp));
-                return 0;
-
-            case WM_MOVE:
-                drv->OnMove(hwnd, w, (short)LOWORD(lp), (short)HIWORD(lp));
-                return 0;
-
-            case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN:
-                drv->OnMouseDown(hwnd, w, GET_X_LPARAM(lp), GET_Y_LPARAM(lp),
-                    msg == WM_LBUTTONDOWN ? 1 :
-                    msg == WM_RBUTTONDOWN ? 2 : 3);
-                return 0;
-
-            case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP:
-                drv->OnMouseUp(hwnd, w, GET_X_LPARAM(lp), GET_Y_LPARAM(lp),
-                    msg == WM_LBUTTONUP ? 1 :
-                    msg == WM_RBUTTONUP ? 2 : 3);
-                return 0;
-
-            case WM_MOUSEMOVE:
-                drv->OnMouseMove(hwnd, w, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
-                return 0;
-
-            case WM_KEYDOWN:
-                drv->OnKeyDown(hwnd, w, (int)wp);
-                return 0;
-
-            case WM_KEYUP:
-                drv->OnKeyUp(hwnd, w, (int)wp);
-                return 0;
-            }
-
-            return DefWindowProcW(hwnd, msg, wp, lp);
+        ~Win() override {
+            sink = nullptr;
         }
     };
 
-    // ============================================================================
-    //  TWindowsDriver
-    //
-    //  КОНТРАКТ ДЕСТРУКТОРА:
-    //   * ~TWindowsDriver НЕ трогает HWND. Это сознательно: порядок
-    //     «дерево → драйвер» гарантируется снаружи (см. wWinMain и
-    //     TApplication::Run), но драйвер не должен на это рассчитывать,
-    //     чтобы оставаться устойчивым к ошибкам пользователя.
-    //   * FRegisteredClasses не снимаются (UnregisterClass не вызывается).
-    //     Регистрация ленивая и идемпотентная; повторный RegisterClassExW
-    //     для того же имени — no-op.
-    // ============================================================================
-    class TWindowsDriver : public IOSDriver, public ITWindowsDriver {
-        INHERITED(IOSDriver);
+    std::set<std::wstring> FRegisteredClasses;
+    HINSTANCE              FInst = nullptr;
+    int                    FNextId = 1000;
 
-    public:
-        explicit TWindowsDriver(HINSTANCE hInstance) {
-            FInst = hInstance ? hInstance : GetModuleHandleW(nullptr);
-            Init();
+    virtual ~ITWindowsDriver() = default;
+
+    // ------------------------------------------------------------------
+    //  GWLP_USERDATA — единственный индекс HWND -> Win*.
+    //  Пишется ЯВНО в CreateWin (не из WM_NCCREATE!): для системных
+    //  контролов (BUTTON, EDIT, COMBOBOX) наш WndProc не вызывается,
+    //  и запись из WM_NCCREATE для них не сработала бы.
+    //  Читается только в WinOf. Больше нигде.
+    // ------------------------------------------------------------------
+    static void AttachWin(HWND hwnd, Win* w) {
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)w);
+    }
+    static Win* WinOf(HWND hwnd) {
+        return reinterpret_cast<Win*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    }
+
+    void EnsureClass(const wchar_t* cls) {
+        if (!cls) return;
+        if (FRegisteredClasses.count(cls)) return;
+
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+        wc.lpfnWndProc = &ITWindowsDriver::WndProc;
+        wc.hInstance = FInst;
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.hbrBackground = nullptr;
+        wc.lpszClassName = cls;
+
+        if (!RegisterClassExW(&wc) &&
+            GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            return;
         }
 
-        ~TWindowsDriver() override {
-            Shutdown();
-        }
+        FRegisteredClasses.insert(cls);
+    }
 
-        TWindowsDriver(const TWindowsDriver&) = delete;
-        TWindowsDriver& operator=(const TWindowsDriver&) = delete;
+    std::unique_ptr<Win> CreateWin(const ControlDesc& d,
+        const wchar_t* cls,
+        DWORD style, DWORD exStyle,
+        HWND parent,
+        int x, int y, int w, int h,
+        int ctrlId)
+    {
+        auto win = std::make_unique<Win>();
+        win->driver = this;
+        win->kind = d.kind;
+        win->id = d.id;
+        win->isForm = (d.kind == ControlKind::Form);
 
-        const char* Name() const override { return "Windows"; }
+        win->hwnd.reset(::CreateWindowExW(
+            exStyle, cls, Utf8ToW(d.caption).c_str(), style,
+            x, y, w, h, parent, (HMENU)(INT_PTR)ctrlId,
+            FInst, nullptr));
 
-        void Init() override {
-        }
+        if (!win->hwnd) return nullptr;
 
-        void Shutdown() override {
-            // Намеренно пусто. См. контракт деструктора выше.
-        }
+        AttachWin(win->hwnd.get(), win.get());
+        return win;
+    }
 
-        std::unique_ptr<IOSHandle> CreateControl(const ControlDesc& d) override {
-            HWND parent = d.parent ? static_cast<Win*>(d.parent)->hwnd.get() : nullptr;
+    virtual void OnCommand(HWND, Win*, WORD, HWND, WORD) {}
+    virtual void OnPaint(HWND, Win*, HDC) {}
+    virtual bool OnEraseBackground(HWND, Win*, HDC) { return false; }
+    virtual void OnShowWindow(HWND, Win*, BOOL) {}
+    virtual bool OnClose(HWND, Win*) { return false; }
+    virtual void OnSize(HWND, Win*, int, int) {}
+    virtual void OnMove(HWND, Win*, int, int) {}
+    virtual void OnMouseDown(HWND, Win*, int, int, int) {}
+    virtual void OnMouseUp(HWND, Win*, int, int, int) {}
+    virtual void OnMouseMove(HWND, Win*, int, int) {}
+    virtual void OnKeyDown(HWND, Win*, int) {}
+    virtual void OnKeyUp(HWND, Win*, int) {}
 
-            DWORD style = 0, exStyle = 0;
-            const wchar_t* cls = nullptr;
+    static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+        Win* w = WinOf(hwnd);
+        if (!w || !w->driver) return DefWindowProcW(hwnd, msg, wp, lp);
 
-            switch (d.kind) {
-            case ControlKind::Form:
-                cls = L"VCLFormClass";
-                style = WS_OVERLAPPEDWINDOW;
-                EnsureClass(cls);
-                break;
-            case ControlKind::Panel:
-                cls = L"VCLPanelClass";
-                style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-                EnsureClass(cls);
-                break;
-            case ControlKind::Label:
-                cls = L"STATIC";
-                style = WS_CHILD | WS_VISIBLE | SS_LEFT;
-                break;
-            case ControlKind::Button:
-                cls = L"BUTTON";
-                style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON;
-                break;
-            case ControlKind::CheckBox:
-                cls = L"BUTTON";
-                style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX;
-                break;
-            case ControlKind::Edit:
-                cls = L"EDIT";
-                style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_AUTOHSCROLL;
-                exStyle = WS_EX_CLIENTEDGE;
-                break;
-            case ControlKind::ComboBox:
-                cls = L"COMBOBOX";
-                style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL;
-                break;
-            case ControlKind::ListBox:
-                cls = L"LISTBOX";
-                style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY;
-                exStyle = WS_EX_CLIENTEDGE;
-                break;
-            }
+        ITWindowsDriver* drv = w->driver;
 
-            if (!d.visible) style &= ~WS_VISIBLE;
-            if (!d.enabled) style |= WS_DISABLED;
+        switch (msg) {
+        case WM_COMMAND:
+            drv->OnCommand(hwnd, w, HIWORD(wp), (HWND)lp, LOWORD(wp));
+            return 0;
 
-            int x = d.x, y = d.y, ww = d.w, hh = d.h;
-            if (d.kind == ControlKind::Form) {
-                RECT r{ 0, 0, ww, hh };
-                AdjustWindowRectEx(&r, style, FALSE, exStyle);
-                ww = r.right - r.left;
-                hh = r.bottom - r.top;
-            }
-
-            int ctrlId = 0;
-            if (d.kind != ControlKind::Form && d.kind != ControlKind::Panel)
-                ctrlId = (d.id ? d.id : FNextId++);
-
-            return CreateWin(d, cls, style, exStyle, parent, x, y, ww, hh, ctrlId);
-        }
-
-        void SetBounds(IOSHandle* h, int l, int t, int w, int ht) override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return;
-            ::SetWindowPos(win->hwnd.get(), nullptr, l, t, w, ht,
-                SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-
-        void SetVisible(IOSHandle* h, bool v) override {
-            auto* win = static_cast<Win*>(h);
-            if (!win) return;
-            if (win->hwnd) ::ShowWindow(win->hwnd.get(), v ? SW_SHOW : SW_HIDE);
-        }
-
-        void SetText(IOSHandle* h, const std::string& text) override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return;
-            ::SetWindowTextW(win->hwnd.get(), Utf8ToW(text).c_str());
-        }
-
-        std::string GetText(IOSHandle* h) const override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return {};
-            int len = GetWindowTextLengthW(win->hwnd.get());
-            if (len <= 0) return {};
-            std::wstring s(len + 1, L'\0');
-            int got = GetWindowTextW(win->hwnd.get(), &s[0], len + 1);
-            s.resize(got > 0 ? got : 0);
-            return WToUtf8(s);
-        }
-
-        void SetEnabled(IOSHandle* h, bool e) override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return;
-            ::EnableWindow(win->hwnd.get(), e ? TRUE : FALSE);
-        }
-
-        void Invalidate(IOSHandle* h) override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return;
-            ::InvalidateRect(win->hwnd.get(), nullptr, TRUE);
-        }
-
-        void SetCheck(IOSHandle* h, bool c) override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return;
-            SendMessageW(win->hwnd.get(), BM_SETCHECK,
-                c ? BST_CHECKED : BST_UNCHECKED, 0);
-        }
-
-        bool GetCheck(IOSHandle* h) const override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return false;
-            return SendMessageW(win->hwnd.get(), BM_GETCHECK, 0, 0) == BST_CHECKED;
-        }
-
-        void AddString(IOSHandle* h, const std::string& s) override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return;
-            std::wstring ws = Utf8ToW(s);
-            SendMessageW(win->hwnd.get(), CB_ADDSTRING, 0, (LPARAM)ws.c_str());
-        }
-
-        void SetSel(IOSHandle* h, int idx) override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return;
-            SendMessageW(win->hwnd.get(), CB_SETCURSEL, idx, 0);
-        }
-
-        int GetSel(IOSHandle* h) const override {
-            auto* win = static_cast<Win*>(h);
-            if (!win || !win->hwnd) return -1;
-            return (int)SendMessageW(win->hwnd.get(), CB_GETCURSEL, 0, 0);
-        }
-
-        void SetEventSink(IOSHandle* h, IEventSink* sink) override {
-            auto* w = static_cast<Win*>(h);
-            if (!w) return;
-            w->sink = sink;
-        }
-
-        static IEventSink* SinkForHwnd(HWND h) {
-            Win* w = WinOf(h);
-            return w ? w->sink : nullptr;
-        }
-
-        std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h) override {
-            auto* w = static_cast<Win*>(h);
-            if (!w || !w->hwnd) return nullptr;
-            return std::make_unique<TWindowsCanvas>(w->hwnd.get());
-        }
-
-        int RunMessageLoop() override {
-            MSG msg;
-            while (true) {
-                BOOL r = GetMessageW(&msg, nullptr, 0, 0);
-                if (r == 0) break;
-                if (r < 0) break;
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            wil::unique_hdc_paint hdc = wil::BeginPaint(hwnd, &ps);
+            drv->OnPaint(hwnd, w, hdc.get());
             return 0;
         }
 
-        void OnCommand(HWND, Win*, WORD code, HWND child, WORD) override {
-            if (!child) return;
-            auto* sink = SinkForHwnd(child);
-            if (!sink) return;
+        case WM_ERASEBKGND:
+            if (drv->OnEraseBackground(hwnd, w, (HDC)wp)) return 1;
+            break;
 
-            OSEvent e; e.key = (int)code;
-            switch (code) {
-            case BN_CLICKED:
-                e.type = OSEvent::Command;
-                sink->OnOSEvent(e);
-                break;
-            case CBN_SELCHANGE:
-            case CBN_EDITCHANGE:
-            case EN_CHANGE:
-                e.type = OSEvent::Change;
-                sink->OnOSEvent(e);
-                break;
-            default:
-                break;
+        case WM_SHOWWINDOW:
+            drv->OnShowWindow(hwnd, w, (BOOL)wp);
+            return 0;
+
+        case WM_CLOSE:
+            if (drv->OnClose(hwnd, w)) return 0;
+            break;
+
+        case WM_DESTROY:
+            if (!GetParent(hwnd)) PostQuitMessage(0);
+            return 0;
+
+        case WM_NCDESTROY:
+            if (w) {
+                AttachWin(hwnd, nullptr);
+                w->hwnd.release();
             }
+            return DefWindowProcW(hwnd, msg, wp, lp);
+
+        case WM_SIZE:
+            drv->OnSize(hwnd, w, LOWORD(lp), HIWORD(lp));
+            return 0;
+
+        case WM_MOVE:
+            drv->OnMove(hwnd, w, (short)LOWORD(lp), (short)HIWORD(lp));
+            return 0;
+
+        case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN:
+            drv->OnMouseDown(hwnd, w, GET_X_LPARAM(lp), GET_Y_LPARAM(lp),
+                msg == WM_LBUTTONDOWN ? 1 :
+                msg == WM_RBUTTONDOWN ? 2 : 3);
+            return 0;
+
+        case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP:
+            drv->OnMouseUp(hwnd, w, GET_X_LPARAM(lp), GET_Y_LPARAM(lp),
+                msg == WM_LBUTTONUP ? 1 :
+                msg == WM_RBUTTONUP ? 2 : 3);
+            return 0;
+
+        case WM_MOUSEMOVE:
+            drv->OnMouseMove(hwnd, w, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+            return 0;
+
+        case WM_KEYDOWN:
+            drv->OnKeyDown(hwnd, w, (int)wp);
+            return 0;
+
+        case WM_KEYUP:
+            drv->OnKeyUp(hwnd, w, (int)wp);
+            return 0;
         }
 
-        bool OnEraseBackground(HWND hwnd, Win* w, HDC dc) override {
-            if (!w) return false;
-            if (w->kind != ControlKind::Panel && w->kind != ControlKind::Form)
-                return false;
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+};
 
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-            wil::unique_hbrush br(
-                CreateSolidBrush(GetSysColor(COLOR_BTNFACE)));
-            ::FillRect(dc, &rc, br.get());
-            return true;
+// ============================================================================
+//  TWindowsDriver
+//
+//  КОНТРАКТ ДЕСТРУКТОРА:
+//   * ~TWindowsDriver НЕ трогает HWND. Это сознательно: порядок
+//     «дерево → драйвер» гарантируется снаружи (см. wWinMain и
+//     TApplication::Run), но драйвер не должен на это рассчитывать,
+//     чтобы оставаться устойчивым к ошибкам пользователя.
+//   * FRegisteredClasses не снимаются (UnregisterClass не вызывается).
+//     Регистрация ленивая и идемпотентная; повторный RegisterClassExW
+//     для того же имени — no-op.
+// ============================================================================
+class TWindowsDriver : public IOSDriver, public ITWindowsDriver {
+
+public:
+    explicit TWindowsDriver(HINSTANCE hInstance) {
+        FInst = hInstance ? hInstance : GetModuleHandleW(nullptr);
+        Init();
+    }
+
+    ~TWindowsDriver() override {
+        Shutdown();
+    }
+
+    TWindowsDriver(const TWindowsDriver&) = delete;
+    TWindowsDriver& operator=(const TWindowsDriver&) = delete;
+
+    const char* Name() const override { return "Windows"; }
+
+    void Init() override {
+    }
+
+    void Shutdown() override {
+        // Намеренно пусто. См. контракт деструктора выше.
+    }
+
+    std::unique_ptr<IOSHandle> CreateControl(const ControlDesc& d) override {
+        HWND parent = d.parent ? static_cast<Win*>(d.parent)->hwnd.get() : nullptr;
+
+        DWORD style = 0, exStyle = 0;
+        const wchar_t* cls = nullptr;
+
+        switch (d.kind) {
+        case ControlKind::Form:
+            cls = L"VCLFormClass";
+            style = WS_OVERLAPPEDWINDOW;
+            EnsureClass(cls);
+            break;
+        case ControlKind::Panel:
+            cls = L"VCLPanelClass";
+            style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+            EnsureClass(cls);
+            break;
+        case ControlKind::Label:
+            cls = L"STATIC";
+            style = WS_CHILD | WS_VISIBLE | SS_LEFT;
+            break;
+        case ControlKind::Button:
+            cls = L"BUTTON";
+            style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON;
+            break;
+        case ControlKind::CheckBox:
+            cls = L"BUTTON";
+            style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX;
+            break;
+        case ControlKind::Edit:
+            cls = L"EDIT";
+            style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_AUTOHSCROLL;
+            exStyle = WS_EX_CLIENTEDGE;
+            break;
+        case ControlKind::ComboBox:
+            cls = L"COMBOBOX";
+            style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL;
+            break;
+        case ControlKind::ListBox:
+            cls = L"LISTBOX";
+            style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY;
+            exStyle = WS_EX_CLIENTEDGE;
+            break;
         }
 
-        template <class F>
-        static void Emit(Win* w, OSEvent::Type type, F&& setup) {
-            if (!w || !w->sink) return;
-            OSEvent e;
-            e.type = type;
-            setup(e);
-            w->sink->OnOSEvent(e);
+        if (!d.visible) style &= ~WS_VISIBLE;
+        if (!d.enabled) style |= WS_DISABLED;
+
+        int x = d.x, y = d.y, ww = d.w, hh = d.h;
+        if (d.kind == ControlKind::Form) {
+            RECT r{ 0, 0, ww, hh };
+            AdjustWindowRectEx(&r, style, FALSE, exStyle);
+            ww = r.right - r.left;
+            hh = r.bottom - r.top;
         }
 
-        bool OnClose(HWND, Win* w) override {
-            if (!w || !w->sink) return false;
-            OSEvent e;
-            e.type = OSEvent::Close;
-            w->sink->OnOSEvent(e);
-            return e.cancel;
-        }
+        int ctrlId = 0;
+        if (d.kind != ControlKind::Form && d.kind != ControlKind::Panel)
+            ctrlId = (d.id ? d.id : FNextId++);
 
-        void OnPaint(HWND, Win* w, HDC dc) override {
-            Emit(w, OSEvent::Paint, [](OSEvent&) {});
-        }
+        return CreateWin(d, cls, style, exStyle, parent, x, y, ww, hh, ctrlId);
+    }
 
-        void OnShowWindow(HWND, Win* w, BOOL shown) override {
-            Emit(w, shown ? OSEvent::Show : OSEvent::Hide, [](OSEvent&) {});
-        }
+    void SetBounds(IOSHandle* h, int l, int t, int w, int ht) override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return;
+        ::SetWindowPos(win->hwnd.get(), nullptr, l, t, w, ht,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 
-        void OnSize(HWND, Win* w, int width, int height) override {
-            Emit(w, OSEvent::Resize, [=](OSEvent& e) {
-                e.width = width; e.height = height; });
-        }
+    void SetVisible(IOSHandle* h, bool v) override {
+        auto* win = static_cast<Win*>(h);
+        if (!win) return;
+        if (win->hwnd) ::ShowWindow(win->hwnd.get(), v ? SW_SHOW : SW_HIDE);
+    }
 
-        void OnMove(HWND, Win* w, int x, int y) override {
-            Emit(w, OSEvent::Move, [=](OSEvent& e) {
-                e.x = x; e.y = y; });
-        }
+    void SetText(IOSHandle* h, const std::string& text) override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return;
+        ::SetWindowTextW(win->hwnd.get(), Utf8ToW(text).c_str());
+    }
 
-        void OnMouseDown(HWND, Win* w, int x, int y, int button) override {
-            Emit(w, OSEvent::MouseDown, [=](OSEvent& e) {
-                e.x = x; e.y = y; e.button = button; });
-        }
+    std::string GetText(IOSHandle* h) const override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return {};
+        int len = GetWindowTextLengthW(win->hwnd.get());
+        if (len <= 0) return {};
+        std::wstring s(len + 1, L'\0');
+        int got = GetWindowTextW(win->hwnd.get(), &s[0], len + 1);
+        s.resize(got > 0 ? got : 0);
+        return WToUtf8(s);
+    }
 
-        void OnMouseUp(HWND, Win* w, int x, int y, int button) override {
-            Emit(w, OSEvent::MouseUp, [=](OSEvent& e) {
-                e.x = x; e.y = y; e.button = button; });
-        }
+    void SetEnabled(IOSHandle* h, bool e) override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return;
+        ::EnableWindow(win->hwnd.get(), e ? TRUE : FALSE);
+    }
 
-        void OnMouseMove(HWND, Win* w, int x, int y) override {
-            Emit(w, OSEvent::MouseMove, [=](OSEvent& e) {
-                e.x = x; e.y = y; });
-        }
+    void Invalidate(IOSHandle* h) override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return;
+        ::InvalidateRect(win->hwnd.get(), nullptr, TRUE);
+    }
 
-        void OnKeyDown(HWND, Win* w, int vk) override {
-            Emit(w, OSEvent::KeyDown, [=](OSEvent& e) { e.key = vk; });
-        }
+    void SetCheck(IOSHandle* h, bool c) override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return;
+        SendMessageW(win->hwnd.get(), BM_SETCHECK,
+            c ? BST_CHECKED : BST_UNCHECKED, 0);
+    }
 
-        void OnKeyUp(HWND, Win* w, int vk) override {
-            Emit(w, OSEvent::KeyUp, [=](OSEvent& e) { e.key = vk; });
+    bool GetCheck(IOSHandle* h) const override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return false;
+        return SendMessageW(win->hwnd.get(), BM_GETCHECK, 0, 0) == BST_CHECKED;
+    }
+
+    void AddString(IOSHandle* h, const std::string& s) override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return;
+        std::wstring ws = Utf8ToW(s);
+        SendMessageW(win->hwnd.get(), CB_ADDSTRING, 0, (LPARAM)ws.c_str());
+    }
+
+    void SetSel(IOSHandle* h, int idx) override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return;
+        SendMessageW(win->hwnd.get(), CB_SETCURSEL, idx, 0);
+    }
+
+    int GetSel(IOSHandle* h) const override {
+        auto* win = static_cast<Win*>(h);
+        if (!win || !win->hwnd) return -1;
+        return (int)SendMessageW(win->hwnd.get(), CB_GETCURSEL, 0, 0);
+    }
+
+    void SetEventSink(IOSHandle* h, IEventSink* sink) override {
+        auto* w = static_cast<Win*>(h);
+        if (!w) return;
+        w->sink = sink;
+    }
+
+    static IEventSink* SinkForHwnd(HWND h) {
+        Win* w = WinOf(h);
+        return w ? w->sink : nullptr;
+    }
+
+    std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h) override {
+        auto* w = static_cast<Win*>(h);
+        if (!w || !w->hwnd) return nullptr;
+        return std::make_unique<TWindowsCanvas>(w->hwnd.get());
+    }
+
+    int RunMessageLoop() override {
+        MSG msg;
+        while (true) {
+            BOOL r = GetMessageW(&msg, nullptr, 0, 0);
+            if (r == 0) break;
+            if (r < 0) break;
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
         }
-    };
+        return 0;
+    }
+
+    void OnCommand(HWND, Win*, WORD code, HWND child, WORD) override {
+        if (!child) return;
+        auto* sink = SinkForHwnd(child);
+        if (!sink) return;
+
+        OSEvent e; e.key = (int)code;
+        switch (code) {
+        case BN_CLICKED:
+            e.type = OSEvent::Command;
+            sink->OnOSEvent(e);
+            break;
+        case CBN_SELCHANGE:
+        case CBN_EDITCHANGE:
+        case EN_CHANGE:
+            e.type = OSEvent::Change;
+            sink->OnOSEvent(e);
+            break;
+        default:
+            break;
+        }
+    }
+
+    bool OnEraseBackground(HWND hwnd, Win* w, HDC dc) override {
+        if (!w) return false;
+        if (w->kind != ControlKind::Panel && w->kind != ControlKind::Form)
+            return false;
+
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        wil::unique_hbrush br(
+            CreateSolidBrush(GetSysColor(COLOR_BTNFACE)));
+        ::FillRect(dc, &rc, br.get());
+        return true;
+    }
+
+    template <class F>
+    static void Emit(Win* w, OSEvent::Type type, F&& setup) {
+        if (!w || !w->sink) return;
+        OSEvent e;
+        e.type = type;
+        setup(e);
+        w->sink->OnOSEvent(e);
+    }
+
+    bool OnClose(HWND, Win* w) override {
+        if (!w || !w->sink) return false;
+        OSEvent e;
+        e.type = OSEvent::Close;
+        w->sink->OnOSEvent(e);
+        return e.cancel;
+    }
+
+    void OnPaint(HWND, Win* w, HDC dc) override {
+        Emit(w, OSEvent::Paint, [](OSEvent&) {});
+    }
+
+    void OnShowWindow(HWND, Win* w, BOOL shown) override {
+        Emit(w, shown ? OSEvent::Show : OSEvent::Hide, [](OSEvent&) {});
+    }
+
+    void OnSize(HWND, Win* w, int width, int height) override {
+        Emit(w, OSEvent::Resize, [=](OSEvent& e) {
+            e.width = width; e.height = height; });
+    }
+
+    void OnMove(HWND, Win* w, int x, int y) override {
+        Emit(w, OSEvent::Move, [=](OSEvent& e) {
+            e.x = x; e.y = y; });
+    }
+
+    void OnMouseDown(HWND, Win* w, int x, int y, int button) override {
+        Emit(w, OSEvent::MouseDown, [=](OSEvent& e) {
+            e.x = x; e.y = y; e.button = button; });
+    }
+
+    void OnMouseUp(HWND, Win* w, int x, int y, int button) override {
+        Emit(w, OSEvent::MouseUp, [=](OSEvent& e) {
+            e.x = x; e.y = y; e.button = button; });
+    }
+
+    void OnMouseMove(HWND, Win* w, int x, int y) override {
+        Emit(w, OSEvent::MouseMove, [=](OSEvent& e) {
+            e.x = x; e.y = y; });
+    }
+
+    void OnKeyDown(HWND, Win* w, int vk) override {
+        Emit(w, OSEvent::KeyDown, [=](OSEvent& e) { e.key = vk; });
+    }
+
+    void OnKeyUp(HWND, Win* w, int vk) override {
+        Emit(w, OSEvent::KeyUp, [=](OSEvent& e) { e.key = vk; });
+    }
+};
 
 #endif // _WIN32
-
-} // namespace vcl
 
 // ============================================================================
 //  wWinMain — точка входа
@@ -1400,7 +1401,6 @@ namespace vcl {
 //   * ~TWindowsDriver HWND не трогает — сознательно.
 // ============================================================================
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
-    using namespace vcl;
 
     // 1. Драйвер создаётся ПЕРВЫМ — значит, умрёт ПОСЛЕДНИМ.
     auto driver = std::make_unique<TWindowsDriver>(hInstance);
