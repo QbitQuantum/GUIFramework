@@ -14,12 +14,15 @@
 //      автоматически при разрушении FOwnedComponents.
 //
 //  КОНТРАКТ ДРАЙВЕРА (Win32):
-//   * Драйвер — синглтон. Указатель живёт в БАЗЕ ITWindowsDriver::s_instance.
-//   * Наследник (TWindowsDriver) в Init() пишет s_instance = this,
-//     в Shutdown() — сбрасывает, если он же и стоит.
-//   * WndProc (статик базы) читает s_instance напрямую — без forward-decl
-//     на наследника и без Win::owner.
-//   * Win хранит только то, что уникально для окна: hwnd, sink, kind, id.
+//   * Win::driver — честное per-window поле: "кто создал это окно".
+//   * GWLP_USERDATA — единственный индекс HWND -> Win*. Пишется ЯВНО
+//     в CreateWin после CreateWindowExW, а не из WM_NCCREATE. Это важно:
+//     для системных контролов (BUTTON, EDIT, COMBOBOX) наш WndProc
+//     не вызывается, и запись из WM_NCCREATE для них не сработала бы.
+//   * Читается GWLP_USERDATA только в WinOf. Больше нигде.
+//   * WndProc не знает о глобальном состоянии. Драйвер берётся из
+//     Win::driver, а не из синглтона.
+//   * FByHwnd нет — он дублировал GWLP_USERDATA.
 // ============================================================================
 #pragma once
 
@@ -850,6 +853,7 @@ namespace vcl {
     public:
         struct Win : IOSHandle {
             wil::unique_hwnd hwnd;
+            ITWindowsDriver* driver = nullptr;
             IEventSink* sink = nullptr;
             ControlKind      kind = ControlKind::Panel;
             int              id = 0;
@@ -860,18 +864,28 @@ namespace vcl {
             }
         };
 
-        // Синглтон драйвера. Живёт в БАЗЕ: WndProc статик, ему нужен
-        // прямой доступ без forward-declaration на наследника.
-        inline static ITWindowsDriver* s_instance = nullptr;
+        // Синглтон драйвера убран. WndProc его не использует — драйвер
+        // приходит через Win::driver. Глобальная точка доступа не нужна.
 
-        static ITWindowsDriver* Instance() { return s_instance; }
-
-        std::map<HWND, Win*>   FByHwnd;
         std::set<std::wstring> FRegisteredClasses;
         HINSTANCE              FInst = nullptr;
         int                    FNextId = 1000;
 
         virtual ~ITWindowsDriver() = default;
+
+        // ------------------------------------------------------------------
+        //  GWLP_USERDATA — единственный индекс HWND -> Win*.
+        //  Пишется ЯВНО в CreateWin (не из WM_NCCREATE!): для системных
+        //  контролов (BUTTON, EDIT, COMBOBOX) наш WndProc не вызывается,
+        //  и запись из WM_NCCREATE для них не сработала бы.
+        //  Читается только в WinOf. Больше нигде.
+        // ------------------------------------------------------------------
+        static void AttachWin(HWND hwnd, Win* w) {
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)w);
+        }
+        static Win* WinOf(HWND hwnd) {
+            return reinterpret_cast<Win*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        }
 
         // Ленивая идемпотентная регистрация класса окна.
         // Вызывается из CreateControl перед CreateWindowExW.
@@ -904,17 +918,23 @@ namespace vcl {
             int ctrlId)
         {
             auto win = std::make_unique<Win>();
+            win->driver = this;
             win->kind = d.kind;
             win->id = d.id;
             win->isForm = (d.kind == ControlKind::Form);
+
+            // lpCreateParams не нужен: Win* привязывается явно ниже.
             win->hwnd.reset(::CreateWindowExW(
                 exStyle, cls, Utf8ToW(d.caption).c_str(), style,
                 x, y, w, h, parent, (HMENU)(INT_PTR)ctrlId,
-                FInst, win.get()));
+                FInst, nullptr));
 
             if (!win->hwnd) return nullptr;
-            SetWindowLongPtrW(win->hwnd.get(), GWLP_USERDATA, (LONG_PTR)win.get());
-            FByHwnd[win->hwnd.get()] = win.get();
+
+            // Единственное место, где Win* привязывается к HWND.
+            // Работает и для наших классов (VCLFormClass/VCLPanelClass),
+            // и для системных (BUTTON/EDIT/COMBOBOX/...).
+            AttachWin(win->hwnd.get(), win.get());
             return win;
         }
 
@@ -932,18 +952,13 @@ namespace vcl {
         virtual void OnKeyUp(HWND, Win*, int) {}
 
         static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-            // Драйвер — синглтон базы. Никаких forward-decl на TWindowsDriver.
-            ITWindowsDriver* drv = s_instance;
-            if (!drv) return DefWindowProcW(hwnd, msg, wp, lp);
-            Win* w = nullptr;
-            if (msg == WM_NCCREATE) {
-                auto* cs = reinterpret_cast<CREATESTRUCTW*>(lp);
-                w = static_cast<Win*>(cs->lpCreateParams);
-                if (w) SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)w);
-            }
-            else {
-                w = reinterpret_cast<Win*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-            }
+            // Win* уже привязан в CreateWin. WM_NCCREATE-ветка не нужна:
+            // для системных контролов наш WndProc всё равно не вызывается,
+            // а для наших AttachWin уже сделан.
+            Win* w = WinOf(hwnd);
+            if (!w || !w->driver) return DefWindowProcW(hwnd, msg, wp, lp);
+
+            ITWindowsDriver* drv = w->driver;
 
             switch (msg) {
             case WM_COMMAND:
@@ -974,9 +989,9 @@ namespace vcl {
                 return 0;
 
             case WM_NCDESTROY:
+                // Отцепляем Win* от HWND. Сам Win* живёт в unique_ptr<TOSControl>.
                 if (w) {
-                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-                    drv->FByHwnd.erase(hwnd);
+                    AttachWin(hwnd, nullptr);
                     w->hwnd.release();
                 }
                 return DefWindowProcW(hwnd, msg, wp, lp);
@@ -1037,16 +1052,9 @@ namespace vcl {
         const char* Name() const override { return "Windows"; }
 
         void Init() override {
-            if (s_instance) {
-                ShowMessage(L"TWindowsDriver: instance already exists");
-                std::terminate();
-            }
-            s_instance = this;   // база хранит, наследник выставляет
-            // Регистрация классов — ленивая, в CreateControl через EnsureClass.
         }
 
         void Shutdown() override {
-            if (s_instance == this) s_instance = nullptr;
         }
 
         std::unique_ptr<IOSHandle> CreateControl(const ControlDesc& d) override {
@@ -1192,10 +1200,11 @@ namespace vcl {
             w->sink = sink;
         }
 
-        IEventSink* SinkForHwnd(HWND h) {
-            auto it = FByHwnd.find(h);
-            if (it == FByHwnd.end()) return nullptr;
-            return it->second->sink;
+        // Win* достаётся из GWLP_USERDATA окна. Работает и для системных
+        // контролов, потому что AttachWin пишется в CreateWin.
+        static IEventSink* SinkForHwnd(HWND h) {
+            Win* w = WinOf(h);
+            return w ? w->sink : nullptr;
         }
 
         std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h) override {
@@ -1328,8 +1337,11 @@ namespace vcl {
 //  ДРАЙВЕР:
 //   * Создаётся напрямую: std::make_unique<TWindowsDriver>(hInstance).
 //   * hInstance передаётся в конструктор. Никаких SetHInstance снаружи.
-//   * Синглтон живёт в базе ITWindowsDriver::s_instance.
-//     TWindowsDriver::Init() выставляет его, Shutdown() — сбрасывает.
+//   * Win::driver — честное per-window поле "кто создал это окно".
+//   * GWLP_USERDATA — единственный индекс HWND -> Win*. Пишется явно
+//     в CreateWin (не из WM_NCCREATE): для системных контролов наш
+//     WndProc не вызывается, и запись из WM_NCCREATE не сработала бы.
+//   * WndProc не знает о глобальном состоянии. FByHwnd нет.
 //   * Регистрация классов окон — ленивая, в CreateControl через EnsureClass.
 // ============================================================================
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
