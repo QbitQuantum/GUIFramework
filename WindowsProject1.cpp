@@ -247,8 +247,23 @@ namespace vcl {
     // ============================================================================
     //  TControl — ВИЗУАЛЬНАЯ иерархия. Владение — в TComponent.
     // ============================================================================
-    class TControl : public TComponent {
+    class TControl : public TComponent, public IEventSink {
         INHERITED(TComponent);
+    private:
+        
+        TNotifyEvent FOnClick;
+        TMouseEvent  FOnMouseDown;
+        TMouseEvent  FOnMouseUp;
+        TMouseEvent  FOnMouseMove;
+
+        static TMouseButton ToButton(int b) {
+            switch (b) {
+            case 1: return mbLeft;
+            case 2: return mbRight;
+            case 3: return mbMiddle;
+            default: return mbLeft;
+            }
+        }
     protected:
         int  FLeft = 0, FTop = 0;
         int  FWidth = 0, FHeight = 0;
@@ -257,18 +272,6 @@ namespace vcl {
         std::string FCaption;
 
         TControl* FParent = nullptr;              // визуальный, НЕ владеет
-
-        TNotifyEvent FOnClick;
-        TNotifyEvent FOnChange;
-        TNotifyEvent FOnHide;
-        TNotifyEvent FOnShow;
-        TNotifyEvent FOnPaint;
-        TCloseEvent  FOnClose;
-        TMouseEvent  FOnMouseDown;
-        TMouseEvent  FOnMouseUp;
-        TMouseEvent  FOnMouseMove;
-        TKeyEvent    FOnKeyDown;
-        bool FUpdating = false;
 
     public:
         explicit TControl(TComponent* owner) : TComponent(owner) {}
@@ -308,11 +311,9 @@ namespace vcl {
         TControl* Parent() const { return FParent; }
 
         TNotifyEvent& OnClick() { return FOnClick; }
-        TNotifyEvent& OnChange() { return FOnChange; }
         TMouseEvent& OnMouseDown() { return FOnMouseDown; }
         TMouseEvent& OnMouseUp() { return FOnMouseUp; }
         TMouseEvent& OnMouseMove() { return FOnMouseMove; }
-        TKeyEvent& OnKeyDown() { return FOnKeyDown; }
 
         virtual void OnMove() {}
         virtual void OnResize() {}
@@ -324,12 +325,42 @@ namespace vcl {
         bool InheritsFrom(const char* cls) const override {
             return std::string(cls) == "TControl" || inherited::InheritsFrom(cls);
         }
+
+        void OnOSEvent(OSEvent& e) override {
+            switch (e.type) {
+            case OSEvent::MouseDown:
+                if (FOnMouseDown) FOnMouseDown(this, ToButton(e.button), 0, e.x, e.y);
+                break;
+            case OSEvent::MouseUp:
+                if (FOnMouseUp) FOnMouseUp(this, ToButton(e.button), 0, e.x, e.y);
+                break;
+            case OSEvent::MouseMove:
+                if (FOnMouseMove) FOnMouseMove(this, mbLeft, 0, e.x, e.y);
+                break;
+            case OSEvent::Resize:
+                FWidth = e.width;
+                FHeight = e.height;
+                OnResize();
+                break;
+            case OSEvent::Move:
+                FLeft = e.x;
+                FTop = e.y;
+                OnMove();
+                break;
+            case OSEvent::Command:
+                if (FOnClick) FOnClick(this);
+                break;
+            case OSEvent::Show:      FVisible = true;  break;
+            case OSEvent::Hide:      FVisible = false; break;
+            }
+        }
+
     };
 
     // ============================================================================
     //  TOSControl — TControl с HWND.
     // ============================================================================
-    class TOSControl : public TControl, public IEventSink {
+    class TOSControl : public TControl {
         INHERITED(TControl);
     protected:
         std::unique_ptr<IOSHandle> FHandle;
@@ -351,6 +382,10 @@ namespace vcl {
                 FChildControls.end());
         }
 
+        TNotifyEvent FOnChange;
+        TCloseEvent  FOnClose;
+        TKeyEvent    FOnKeyDown;
+
     public:
         explicit TOSControl(TComponent* owner) : TControl(owner) {}
 
@@ -362,6 +397,12 @@ namespace vcl {
             // TApplication::Run() (разрушает дерево до возврата) и порядок
             // в wWinMain (driver объявлен до app).
         }
+
+        bool FUpdating = false;
+
+        TCloseEvent& OnClose() { return FOnClose; }
+        TNotifyEvent& OnChange() { return FOnChange; }
+        TKeyEvent& OnKeyDown() { return FOnKeyDown; }
 
         // ЯВНЫЙ вызов. Меняет ТОЛЬКО визуальную иерархию.
         void SetParent(TOSControl* p) {
@@ -449,15 +490,6 @@ namespace vcl {
 
         void OnOSEvent(OSEvent& e) override {
             switch (e.type) {
-            case OSEvent::MouseDown:
-                if (FOnMouseDown) FOnMouseDown(this, ToButton(e.button), 0, e.x, e.y);
-                break;
-            case OSEvent::MouseUp:
-                if (FOnMouseUp) FOnMouseUp(this, ToButton(e.button), 0, e.x, e.y);
-                break;
-            case OSEvent::MouseMove:
-                if (FOnMouseMove) FOnMouseMove(this, mbLeft, 0, e.x, e.y);
-                break;
             case OSEvent::KeyDown: {
                 int key = e.key;
                 if (FOnKeyDown) FOnKeyDown(this, key, 0);
@@ -476,26 +508,20 @@ namespace vcl {
             case OSEvent::Change:
                 if (!FUpdating && FOnChange) FOnChange(this);
                 break;
-            case OSEvent::Command:
-                if (FOnClick) FOnClick(this);
-                break;
             case OSEvent::Show:      FVisible = true;  break;
             case OSEvent::Hide:      FVisible = false; break;
+            case OSEvent::Close:
+                if (FOnClose) FOnClose(this, e.cancel);
+                return;
+            default:
+                inherited::OnOSEvent(e);
+                return;
             }
         }
 
         const char* ClassName() const override { return "TOSControl"; }
         bool InheritsFrom(const char* cls) const override {
             return std::string(cls) == "TOSControl" || inherited::InheritsFrom(cls);
-        }
-    private:
-        static TMouseButton ToButton(int b) {
-            switch (b) {
-            case 1: return mbLeft;
-            case 2: return mbRight;
-            case 3: return mbMiddle;
-            default: return mbLeft;
-            }
         }
     };
 
@@ -504,13 +530,42 @@ namespace vcl {
     // ============================================================================
     class TCustomForm : public TOSControl {
         INHERITED(TOSControl);
-    public:
+    private:
         std::unique_ptr<TCanvas> Canvas;
+        TNotifyEvent FOnHide;
+        TNotifyEvent FOnPaint;
+        TNotifyEvent FOnShow;
+    public:
+        TNotifyEvent& OnHide()  { return FOnHide;  }
+        TNotifyEvent& OnPaint() { return FOnPaint; }
+        TNotifyEvent& OnShow()  { return FOnShow;  }
+
         void CreateCanvas() {
-            Canvas = FDriver->CreateCanvas(FHandle.get());
+            if (!Canvas) Canvas = FDriver->CreateCanvas(FHandle.get());
         };
+
         explicit TCustomForm(TComponent* owner) : TOSControl(owner) {}
         ~TCustomForm() override = default;
+
+        void OnOSEvent(OSEvent& e) override {
+            switch (e.type) {
+            case OSEvent::Show:
+                inherited::OnOSEvent(e);
+                if (FOnShow) FOnShow(this);
+                return;
+            case OSEvent::Hide:
+                inherited::OnOSEvent(e);
+                if (FOnHide) FOnHide(this);
+                return;
+            case OSEvent::Paint:
+                if (FOnPaint) FOnPaint(this);
+                PaintTree(Canvas.get());
+                break;
+            default:
+                inherited::OnOSEvent(e);
+                return;
+            }
+        }
     };
 
     // ============================================================================
@@ -524,10 +579,6 @@ namespace vcl {
 
         ControlKind Kind() const override { return ControlKind::Form; }
 
-        TNotifyEvent& OnShow() { return FOnShow; }
-        TNotifyEvent& OnHide() { return FOnHide; }
-        TCloseEvent& OnClose() { return FOnClose; }
-
         void CreateHandle() {
             inherited::CreateHandle(nullptr);
             CreateHandlesRecursive(FHandle.get());
@@ -540,29 +591,6 @@ namespace vcl {
             if (!c) return;
             c->Line(0, 0, 400, 400);
             inherited::PaintTree(c);
-        }
-
-        void OnOSEvent(OSEvent& e) override {
-            switch (e.type) {
-            case OSEvent::Close:
-                inherited::OnOSEvent(e);
-                if (FOnClose) FOnClose(this, e.cancel);
-                return;
-            case OSEvent::Show:
-                inherited::OnOSEvent(e);
-                if (FOnShow) FOnShow(this);
-                return;
-            case OSEvent::Hide:
-                inherited::OnOSEvent(e);
-                if (FOnHide) FOnHide(this);
-                return;
-            case OSEvent::Paint:
-                PaintTree(Canvas.get());
-                break;
-            default:
-                inherited::OnOSEvent(e);
-                return;
-            }
         }
 
         const char* ClassName() const override { return "TForm"; }
