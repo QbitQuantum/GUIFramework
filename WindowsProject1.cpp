@@ -139,9 +139,8 @@ namespace vcl {
 
         // Владение — здесь. Owner забирает unique_ptr(this).
         explicit TComponent(TComponent* owner) : FOwner(owner) {
-            if (owner) {
-                owner->AdoptThis(this);
-            }
+            if (!owner) return;
+            owner->AdoptThis(this);
         }
 
         ~TComponent() override = default;
@@ -260,7 +259,7 @@ namespace vcl {
     // ============================================================================
     class IOSDriver {
     protected:
-        // Избыточно, потому что вс и так делается в конструкторе/деструкторе.
+        // Избыточно, потому что всё и так делается в конструкторе/деструкторе.
         // Можно просто удалить, либо использовать как явный контракт.
         virtual void Init() = 0;
         virtual void Shutdown() = 0;
@@ -384,8 +383,11 @@ namespace vcl {
     private:
 
         void AddChildControl(TOSControl* c) {
-            if (c && std::find(FChildControls.begin(), FChildControls.end(), c) == FChildControls.end())
-                FChildControls.push_back(c);
+            if (!c) return;
+            if (std::find(FChildControls.begin(), 
+                FChildControls.end(), c) != FChildControls.end())
+                return;
+            FChildControls.push_back(c);
         }
 
         void RemoveChildControl(TOSControl* c) {
@@ -462,19 +464,23 @@ namespace vcl {
 
         void SetBounds(int l, int t, int w, int h) override {
             inherited::SetBounds(l, t, w, h);
-            if (FHandle) FDriver->SetBounds(FHandle.get(), l, t, w, h);
+            if (!FHandle) return;
+            FDriver->SetBounds(FHandle.get(), l, t, w, h);
         }
         void SetVisible(bool v) override {
             inherited::SetVisible(v);
-            if (FHandle) FDriver->SetVisible(FHandle.get(), v);
+            if (!FHandle) return;
+            FDriver->SetVisible(FHandle.get(), v);
         }
         void SetCaption(const std::string& c) override {
             inherited::SetCaption(c);
-            if (FHandle) FDriver->SetText(FHandle.get(), c);
+            if (!FHandle) return;
+            FDriver->SetText(FHandle.get(), c);
         }
         void SetEnabled(bool e) override {
             inherited::SetEnabled(e);
-            if (FHandle) FDriver->SetEnabled(FHandle.get(), e);
+            if (!FHandle) return;
+            FDriver->SetEnabled(FHandle.get(), e);
         }
         void Invalidate() override {
             if (FHandle) FDriver->Invalidate(FHandle.get());
@@ -935,9 +941,7 @@ namespace vcl {
             }
 
             ITWindowsDriver* drv = w ? w->owner : nullptr;
-            if (!drv) {
-                return DefWindowProcW(hwnd, msg, wp, lp);
-            }
+            if (!drv) return DefWindowProcW(hwnd, msg, wp, lp);
 
             switch (msg) {
             case WM_COMMAND:
@@ -964,9 +968,7 @@ namespace vcl {
                 break;
 
             case WM_DESTROY:
-                if (!GetParent(hwnd)) {
-                    PostQuitMessage(0);
-                }
+                if (!GetParent(hwnd)) PostQuitMessage(0);
                 return 0;
 
             case WM_NCDESTROY:
@@ -1189,12 +1191,15 @@ namespace vcl {
         }
 
         void SetEventSink(IOSHandle* h, IEventSink* sink) override {
-            if (auto* w = static_cast<Win*>(h)) w->sink = sink;
+            auto* w = static_cast<Win*>(h);
+            if (!w) return;
+            w->sink = sink;
         }
 
         IEventSink* SinkForHwnd(HWND h) {
             auto it = FByHwnd.find(h);
-            return it == FByHwnd.end() ? nullptr : it->second->sink;
+            if (it == FByHwnd.end()) return nullptr;
+            return it->second->sink;
         }
 
         std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h) override {
@@ -1217,30 +1222,30 @@ namespace vcl {
 
         void OnCommand(HWND, Win*, WORD code, HWND child, WORD) override {
             if (!child) return;
-            if (auto* sink = SinkForHwnd(child)) {
-                OSEvent e; e.key = (int)code;
-                switch (code) {
-                case BN_CLICKED:
-                    e.type = OSEvent::Command;
-                    sink->OnOSEvent(e);
-                    break;
-                case CBN_SELCHANGE:
-                case CBN_EDITCHANGE:
-                case EN_CHANGE:
-                    e.type = OSEvent::Change;
-                    sink->OnOSEvent(e);
-                    break;
-                default:
-                    break;
-                }
+            auto* sink = SinkForHwnd(child);
+            if (!sink) return;
+
+            OSEvent e; e.key = (int)code;
+            switch (code) {
+            case BN_CLICKED:
+                e.type = OSEvent::Command;
+                sink->OnOSEvent(e);
+                break;
+            case CBN_SELCHANGE:
+            case CBN_EDITCHANGE:
+            case EN_CHANGE:
+                e.type = OSEvent::Change;
+                sink->OnOSEvent(e);
+                break;
+            default:
+                break;
             }
         }
 
         bool OnEraseBackground(HWND hwnd, Win* w, HDC dc) override {
-            if (!w || (w->kind != ControlKind::Panel &&
-                w->kind != ControlKind::Form)) {
+            if (!w) return false;
+            if (w->kind != ControlKind::Panel && w->kind != ControlKind::Form)
                 return false;
-            }
 
             RECT rc;
             GetClientRect(hwnd, &rc);
