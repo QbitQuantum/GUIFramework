@@ -1466,7 +1466,7 @@ TForm1* Form1 = nullptr;
 // ============================================================================
 //  _tWinMain — билдеровский вход в стиле IDE.
 // ============================================================================
-int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
+int WINAPI _tWinMain(HINSTANCE, HINSTANCE, LPTSTR, int)
 {
     try
     {
