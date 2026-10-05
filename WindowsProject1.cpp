@@ -252,6 +252,7 @@ namespace vcl {
     private:
         
         TNotifyEvent FOnClick;
+        TNotifyEvent FOnResize;
         TMouseEvent  FOnMouseDown;
         TMouseEvent  FOnMouseUp;
         TMouseEvent  FOnMouseMove;
@@ -310,13 +311,13 @@ namespace vcl {
 
         TControl* Parent() const { return FParent; }
 
+        TNotifyEvent& OnResize() { return FOnResize; }
         TNotifyEvent& OnClick() { return FOnClick; }
         TMouseEvent& OnMouseDown() { return FOnMouseDown; }
         TMouseEvent& OnMouseUp() { return FOnMouseUp; }
         TMouseEvent& OnMouseMove() { return FOnMouseMove; }
 
         virtual void OnMove() {}
-        virtual void OnResize() {}
         virtual void OnVisibleChanged() {}
         virtual void OnPaint(TCanvas* Canvas) {}
         virtual void Invalidate() {}
@@ -340,7 +341,7 @@ namespace vcl {
             case OSEvent::Resize:
                 FWidth = e.width;
                 FHeight = e.height;
-                OnResize();
+                if (FOnResize) FOnResize(this);
                 break;
             case OSEvent::Move:
                 FLeft = e.x;
@@ -495,16 +496,6 @@ namespace vcl {
                 if (FOnKeyDown) FOnKeyDown(this, key, 0);
                 break;
             }
-            case OSEvent::Resize:
-                FWidth = e.width;
-                FHeight = e.height;
-                OnResize();
-                break;
-            case OSEvent::Move:
-                FLeft = e.x;
-                FTop = e.y;
-                OnMove();
-                break;
             case OSEvent::Change:
                 if (!FUpdating && FOnChange) FOnChange(this);
                 break;
