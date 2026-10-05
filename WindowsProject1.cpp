@@ -14,10 +14,6 @@
 
 // ============================================================================
 //  INHERITED(Base) — псевдоним базового класса внутри текущего.
-//
-//  Переключатель VCL_USE_TYPEDEF_INHERITED:
-//    1 — typedef Base inherited;   (стиль C++ Builder / VCL)
-//    0 — using inherited = Base;   (современный C++)
 // ============================================================================
 #define VCL_USE_TYPEDEF_INHERITED 1
 
@@ -53,19 +49,102 @@ namespace vcl {
     };
 
     // ============================================================================
-    //  TComponent — источник истины по ВЛАДЕНИЮ.
-    //
-    //  RAII-контракт:
-    //   * FOwnedComponents владеет детьми через unique_ptr.
-    //   * Деструктор TComponent автоматически разрушает всё поддерево.
-    //   * Никаких "явных очисток" снаружи не требуется.
-    //
-    //  Порядок разрушения при выходе из wWinMain:
-    //      ~app    → ~TComponent → FOwnedComponents.clear()
-    //                            → ~TOSControl → ~Win → DestroyWindow
-    //      ~driver → пусто
-    //  Драйвер не владеет окнами и не участвует в их разрушении.
-    //  ~Win не разыменовывает driver — поэтому порядок не критичен.
+    //  Exception
+    // ============================================================================
+    class Exception : public std::exception {
+    public:
+        explicit Exception(const std::string& msg)
+            : FMessage(msg) {
+        }
+
+        Exception(const std::string& msg, int helpContext)
+            : FMessage(msg), FHelpContext(helpContext) {
+        }
+
+        Exception(const std::string& msg, int helpContext,
+            std::unique_ptr<Exception> inner)
+            : FMessage(msg)
+            , FHelpContext(helpContext)
+            , FInnerException(std::move(inner)) {
+        }
+
+        ~Exception() override = default;
+
+        Exception(const Exception&) = delete;
+        Exception& operator=(const Exception&) = delete;
+
+        const std::string& Message() const { return FMessage; }
+        void SetMessage(const std::string& m) { FMessage = m; }
+
+        int  HelpContext() const { return FHelpContext; }
+        void SetHelpContext(int h) { FHelpContext = h; }
+
+        const Exception* InnerException() const { return FInnerException.get(); }
+
+        Exception* GetBaseException() {
+            Exception* e = this;
+            while (e->FInnerException)
+                e = e->FInnerException.get();
+            return e;
+        }
+        const Exception* GetBaseException() const {
+            return const_cast<Exception*>(this)->GetBaseException();
+        }
+
+        const std::string& StackTrace() const { return FStackTrace; }
+        void SetStackTrace(const std::string& s) { FStackTrace = s; }
+
+        virtual const char* ClassName() const { return "Exception"; }
+
+        virtual std::string ToString() const {
+            std::ostringstream os;
+            os << ClassName() << ": " << FMessage;
+
+            const Exception* inner = FInnerException.get();
+            while (inner) {
+                os << "\n  caused by " << inner->ClassName()
+                    << ": " << inner->Message();
+                inner = inner->FInnerException.get();
+            }
+            return os.str();
+        }
+
+        const char* what() const noexcept override {
+            return FMessage.c_str();
+        }
+
+    private:
+        std::string FMessage;
+        int         FHelpContext = 0;
+        std::string FStackTrace;
+
+        std::unique_ptr<Exception> FInnerException;
+    };
+
+    class ERuntimeError : public Exception {
+    public:
+        using Exception::Exception;
+        const char* ClassName() const override { return "ERuntimeError"; }
+    };
+
+    class EInvalidArgument : public Exception {
+    public:
+        using Exception::Exception;
+        const char* ClassName() const override { return "EInvalidArgument"; }
+    };
+
+    class EConvertError : public Exception {
+    public:
+        using Exception::Exception;
+        const char* ClassName() const override { return "EConvertError"; }
+    };
+
+    [[noreturn]] inline void RaiseOuterException(std::unique_ptr<Exception> e) {
+        throw std::runtime_error(e->ToString());
+    }
+
+    // ============================================================================
+    //  TComponent
     // ============================================================================
     class TComponent : public TObject {
         INHERITED(TObject);
@@ -73,19 +152,16 @@ namespace vcl {
         using TComponentList = std::vector<std::unique_ptr<TComponent>>;
 
     protected:
-        TComponent* FOwner = nullptr;   // только для чтения
-        TComponentList  FOwnedComponents;   // владеет детьми
+        TComponent* FOwner = nullptr;
+        TComponentList  FOwnedComponents;
         std::string     FName;
 
-        // Принять this во владение. Вызывается ТОЛЬКО из конструктора
-        // TComponent(TComponent*). Наружу не торчит.
         void AdoptThis(TComponent* c) {
             if (!c) return;
             c->FOwner = this;
             FOwnedComponents.emplace_back(c);
         }
     public:
-        // Владение — здесь. Owner забирает unique_ptr(this).
         explicit TComponent(TComponent* owner) : FOwner(owner) {
             if (!owner) return;
             owner->AdoptThis(this);
@@ -205,12 +281,7 @@ namespace vcl {
     };
 
     // ============================================================================
-    //  IOSDriver — фабрика ресурсов. НЕ владелец окон.
-    //
-    //  Контракт:
-    //   * CreateControl возвращает unique_ptr<IOSHandle> — владение у вызывающего.
-    //   * Драйвер не знает и не должен знать, когда окна разрушаются.
-    //   * Деструктор драйвера не трогает HWND.
+    //  IOSDriver
     // ============================================================================
     class IOSDriver {
     protected:
@@ -242,7 +313,7 @@ namespace vcl {
     };
 
     // ============================================================================
-    //  TControl — ВИЗУАЛЬНАЯ иерархия. Владение — в TComponent.
+    //  TControl
     // ============================================================================
     class TControl : public TComponent, public IEventSink {
         INHERITED(TComponent);
@@ -356,13 +427,7 @@ namespace vcl {
     };
 
     // ============================================================================
-    //  TOSControl — TControl с HWND.
-    //
-    //  RAII:
-    //   * FHandle — unique_ptr<IOSHandle>, владеет HWND.
-    //   * Деструктор TOSControl неявно вызывает ~unique_ptr → ~Win → DestroyWindow.
-    //   * FDriver — сырой указатель, НЕ владеет. В деструкторе не используется.
-    //   * FChildControls — сырые указатели, НЕ владеет (владение — в TComponent).
+    //  TOSControl
     // ============================================================================
     class TOSControl : public TControl {
         INHERITED(TControl);
@@ -401,7 +466,6 @@ namespace vcl {
         TNotifyEvent& OnChange() { return FOnChange; }
         TKeyEvent& OnKeyDown() { return FOnKeyDown; }
 
-        // ЯВНЫЙ вызов. Меняет ТОЛЬКО визуальную иерархию.
         void SetParent(TOSControl* p) {
             if (FParent == p) return;
             if (FParent) RemoveChildControl(this);
@@ -523,9 +587,9 @@ namespace vcl {
         TNotifyEvent FOnPaint;
         TNotifyEvent FOnShow;
     public:
-        TNotifyEvent& OnHide()  { return FOnHide;  }
+        TNotifyEvent& OnHide() { return FOnHide; }
         TNotifyEvent& OnPaint() { return FOnPaint; }
-        TNotifyEvent& OnShow()  { return FOnShow;  }
+        TNotifyEvent& OnShow() { return FOnShow; }
 
         void CreateCanvas() {
             if (!Canvas) Canvas = FDriver->CreateCanvas(FHandle.get());
@@ -714,18 +778,7 @@ namespace vcl {
     };
 
     // ============================================================================
-    //  TApplication : TComponent — корень дерева владения.
-    //
-    //  RAII-контракт:
-    //   * TApplication владеет формой и всем поддеревом через FOwnedComponents
-    //     (унаследовано от TComponent).
-    //   * Деструктор TApplication = деструктор TComponent — дерево
-    //     разрушается автоматически.
-    //   * Драйвер НЕ принадлежит TApplication. Владелец — вызывающий код
-    //     (обычно стек wWinMain). Порядок разрушения "драйвер ↔ дерево"
-    //     не критичен: ~Win не разыменовывает драйвер.
-    //   * Никаких "явных очисток" (ClearOwnedComponents) и никаких
-    //     assert-контрактов — полагаемся на RAII.
+    //  TApplication
     // ============================================================================
     class TApplication : public TComponent {
         INHERITED(TComponent);
@@ -733,19 +786,30 @@ namespace vcl {
         TForm* FMainForm = nullptr;       // ссылка; владение — через FOwnedComponents
         std::string FTitle;
     public:
+
+        // Заглушки в стиле VCL
+        bool MainFormOnTaskBar = false;
+        void Initialize() {}
+
         TApplication(TComponent* owner) : TComponent(owner) {}
 
         ~TApplication() override = default;
 
-        // НЕ владеет. Владелец — вызывающий код.
         void SetDriver(IOSDriver* d) { FDriver = d; }
         IOSDriver* Driver() const { return FDriver; }
 
         const std::string& Title() const { return FTitle; }
         void SetTitle(const std::string& t) { FTitle = t; }
 
-        void SetMainForm(TForm* f) { FMainForm = f; }
+        void CreateForm(TForm* f) { FMainForm = f; }
         TForm* MainForm() const { return FMainForm; }
+
+        // Показ исключения — в стиле VCL ShowException.
+        void ShowException(Exception* e) {
+            if (!e) return;
+            std::string msg = e->ToString();
+            std::cerr << "[Application Error] " << msg << "\n";
+        }
 
         int Run() {
             if (!FDriver) {
@@ -770,29 +834,25 @@ namespace vcl {
 
 } // namespace vcl
 
-    // ============================================================================
-    //  Windows-драйвер
-    // ============================================================================
+// ============================================================================
+//  Windows-драйвер
+// ============================================================================
 #if defined(_WIN32)
 
-#include "include/wil/resource.h"
+// ============================================================================
+//  UTF-8 <-> UTF-16 helpers — ВЫНЕСЕНЫ ВЫШЕ, чтобы их видел ShowException.
+// ============================================================================
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#  include <windowsx.h>
+#  undef min
+#  undef max
 
-#ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#  define NOMINMAX
-#endif
-#include <windows.h>
-#include <windowsx.h>
-#undef min
-#undef max
-
-using namespace vcl;
-
-// ---------------------------------------------------------------------------
-//  UTF-8 <-> UTF-16 helpers
-// ---------------------------------------------------------------------------
 inline std::wstring Utf8ToW(const std::string& s) {
     if (s.empty()) return {};
     int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
@@ -809,6 +869,10 @@ inline std::string WToUtf8(const std::wstring& w) {
         &s[0], n, nullptr, nullptr);
     return s;
 }
+
+#include "include/wil/resource.h"
+
+using namespace vcl;
 
 inline void ShowMessage(const wchar_t* msg)
 {
@@ -891,13 +955,6 @@ public:
 
     virtual ~ITWindowsDriver() = default;
 
-    // ------------------------------------------------------------------
-    //  GWLP_USERDATA — единственный индекс HWND -> Win*.
-    //  Пишется ЯВНО в CreateWin (не из WM_NCCREATE!): для системных
-    //  контролов (BUTTON, EDIT, COMBOBOX) наш WndProc не вызывается,
-    //  и запись из WM_NCCREATE для них не сработала бы.
-    //  Читается только в WinOf. Больше нигде.
-    // ------------------------------------------------------------------
     static void AttachWin(HWND hwnd, Win* w) {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)w);
     }
@@ -1043,15 +1100,6 @@ public:
 
 // ============================================================================
 //  TWindowsDriver
-//
-//  КОНТРАКТ:
-//   * Драйвер — фабрика ресурсов. CreateControl отдаёт владение наружу
-//     (unique_ptr<IOSHandle>).
-//   * Драйвер НЕ владеет HWND и НЕ участвует в их разрушении.
-//   * ~TWindowsDriver пуст и не трогает HWND. Порядок "драйвер ↔ дерево"
-//     не критичен: ~Win не разыменовывает driver.
-//   * FRegisteredClasses не снимаются (UnregisterClass не вызывается).
-//     Регистрация ленивая и идемпотентная.
 // ============================================================================
 class TWindowsDriver : public IOSDriver, public ITWindowsDriver {
 
@@ -1070,10 +1118,8 @@ public:
 
     const char* Name() const override { return "Windows"; }
 
-    void Init() override {
-    }
-
-    void Shutdown() override { }
+    void Init() override {}
+    void Shutdown() override {}
 
     std::unique_ptr<IOSHandle> CreateControl(const ControlDesc& d) override {
         HWND parent = d.parent ? static_cast<Win*>(d.parent)->hwnd.get() : nullptr;
@@ -1338,107 +1384,124 @@ public:
 #endif // _WIN32
 
 // ============================================================================
-//  wWinMain — точка входа
-//
-//  RAII-модель владения:
-//   * app (TApplication : TComponent) владеет формой и всем поддеревом.
-//   * form — new TForm(&app). Владение — у app.
-//   * panel — new TPanel(form). Владение — у form.
-//   * label — new TLabel(panel). Владение — у panel.
-//   * button/chk/combo/edit — new T*(form). Владение — у form.
-//   * SetParent — визуальная иерархия, ЯВНО.
-//   * driver — владение у wWinMain (стек). app НЕ владеет.
-//
-//  Порядок разрушения на выходе из wWinMain:
-//      ~app    → ~TComponent → FOwnedComponents.clear()
-//                            → ~TOSControl → ~Win → DestroyWindow
-//      ~driver → пусто
-//  Драйвер к моменту DestroyWindow ещё жив, но это НЕ требование:
-//  ~Win не разыменовывает driver. Если поменять порядок объявления
-//  (driver после app) — всё тоже будет корректно.
-//
-//  ДРАЙВЕР:
-//   * hInstance передаётся в конструктор.
-//   * Win::driver — per-window поле "кто создал окно", не владеет.
-//   * GWLP_USERDATA — единственный индекс HWND -> Win*. Пишется явно
-//     в CreateWin (не из WM_NCCREATE): для системных контролов наш
-//     WndProc не вызывается, запись из WM_NCCREATE не сработала бы.
-//   * Регистрация классов окон — ленивая, в CreateControl через EnsureClass.
-//   * ~TWindowsDriver HWND не трогает — сознательно.
+//  TForm1 — "сгенерированная IDE" форма.
 // ============================================================================
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
+using namespace vcl;
 
-    // 1. Драйвер создаётся ПЕРВЫМ — умрёт ПОСЛЕДНИМ.
-    //    Это удобно, но НЕ обязательно: ~Win не зависит от driver.
+class TForm1 : public TForm {
+    INHERITED(TForm);
+public:
+    explicit TForm1(TComponent* owner) : TForm(owner) {
+        SetCaption("Hello VCL (Win32)");
+        SetBounds(200, 200, 480, 320);
+
+        OnClose() = [](TObject*, bool& CanClose) {
+            int r = MessageBoxW(nullptr,
+                L"Точно закрыть приложение?",
+                L"Подтверждение",
+                MB_YESNO | MB_ICONQUESTION);
+            CanClose = r == IDNO;
+            };
+
+        auto* panel = new TPanel(this);
+        panel->SetParent(this);
+        panel->SetBounds(10, 10, 460, 80);
+
+        auto* label = new TLabel(panel);
+        label->SetParent(panel);
+        label->SetBounds(20, 30, 400, 24);
+        label->SetCaption("Press the button!");
+
+        auto* button = new TButton(this);
+        button->SetParent(this);
+        button->SetBounds(20, 120, 160, 40);
+        button->SetCaption("Click me");
+        button->OnClick() = [label](TObject*) {
+            label->SetCaption("Clicked at " + std::to_string(GetTickCount64()));
+            };
+
+        auto* chk = new TCheckBox(this);
+        chk->SetParent(this);
+        chk->SetBounds(200, 120, 200, 30);
+        chk->SetCaption("Check me");
+        chk->OnChange() = [chk](TObject*) {
+            (void)chk->Checked();
+            };
+
+        auto* combo = new TComboBox(this);
+        combo->SetParent(this);
+        combo->SetBounds(20, 180, 200, 200);
+        combo->AddItem("Москва");
+        combo->AddItem("Петербург");
+        combo->AddItem("Новосибирск");
+        combo->OnChange() = [combo](TObject*) {
+            int idx = combo->SelectedIndex();
+            (void)idx;
+            };
+
+        auto* edit = new TEdit(this);
+        edit->SetParent(this);
+        edit->SetBounds(20, 230, 250, 25);
+        edit->SetText("Введите текст...");
+        edit->OnChange() = [edit](TObject*) {
+            std::string s = edit->Text();
+            (void)s;
+            };
+    }
+
+    ~TForm1() override = default;
+
+    const char* ClassName() const override { return "TForm1"; }
+    bool InheritsFrom(const char* cls) const override {
+        return std::string(cls) == "TForm1" || inherited::InheritsFrom(cls);
+    }
+};
+
+// ============================================================================
+//  Глобальные объекты — как в IDE-сгенерированном коде VCL.
+// ============================================================================
+std::unique_ptr<TApplication> Application;
+TForm1* Form1 = nullptr;
+
+// ============================================================================
+//  _tWinMain — билдеровский вход в стиле IDE.
+// ============================================================================
+int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
+{
+    try
+    {
+        Application->Initialize();
+        Application->MainFormOnTaskBar = true;
+        Application->CreateForm(Form1);
+        Application->Run();
+    }
+    catch (Exception& exception)
+    {
+        Application->ShowException(&exception);
+    }
+    catch (...)
+    {
+        try
+        {
+            throw Exception("");
+        }
+        catch (Exception& exception)
+        {
+            Application->ShowException(&exception);
+        }
+    }
+    return 0;
+}
+
+// ============================================================================
+//  wWinMain — настоящая точка входа CRT.
+// ============================================================================
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
+{
     TWindowsDriver driver(hInstance);
-
-    // 2. Приложение создаётся ВТОРЫМ — умрёт ПЕРВЫМ, вместе с деревом HWND.
-    auto app = std::make_unique<TApplication>(nullptr);
-    app->SetDriver(&driver);   // НЕ владеет; driver живёт дольше app
-    app->SetTitle("VCL Demo");
-
-    // --- Главная форма. Владеет app. ---
-    auto* form = new TForm(app.get());
-    form->SetCaption("Hello VCL (Win32)");
-    form->SetBounds(200, 200, 480, 320);
-
-    form->OnClose() = [](TObject*, bool& CanClose) -> void {
-        int r = MessageBoxW(nullptr,
-            L"Точно закрыть приложение?",
-            L"Подтверждение",
-            MB_YESNO | MB_ICONQUESTION);
-        CanClose = r == IDNO;
-        };
-
-    // --- Панель. Владеет form. ---
-    auto* panel = new TPanel(form);
-    panel->SetParent(form);
-    panel->SetBounds(10, 10, 460, 80);
-
-    // --- Метка внутри панели. Владеет panel. ---
-    auto* label = new TLabel(panel);
-    label->SetParent(panel);
-    label->SetBounds(20, 30, 400, 24);
-    label->SetCaption("Press the button!");
-
-    // --- Кнопка на форме. Владеет form. ---
-    auto* button = new TButton(form);
-    button->SetParent(form);
-    button->SetBounds(20, 120, 160, 40);
-    button->SetCaption("Click me");
-
-    button->OnClick() = [label](TObject*) {
-        label->SetCaption("Clicked at " + std::to_string(GetTickCount64()));
-        };
-
-    auto* chk = new TCheckBox(form);
-    chk->SetParent(form);
-    chk->SetBounds(200, 120, 200, 30);
-    chk->SetCaption("Check me");
-    chk->OnChange() = [chk](TObject*) {
-        (void)chk->Checked();
-        };
-
-    auto* combo = new TComboBox(form);
-    combo->SetParent(form);
-    combo->SetBounds(20, 180, 200, 200);
-    combo->AddItem("Москва");
-    combo->AddItem("Петербург");
-    combo->AddItem("Новосибирск");
-    combo->OnChange() = [combo](TObject*) {
-        int idx = combo->SelectedIndex();
-        (void)idx;
-        };
-
-    auto* edit = new TEdit(form);
-    edit->SetParent(form);
-    edit->SetBounds(20, 230, 250, 25);
-    edit->SetText("Введите текст...");
-    edit->OnChange() = [edit](TObject*) {
-        std::string s = edit->Text();
-        (void)s;
-        };
-
-    app->SetMainForm(form);
-    return app->Run();
+    Application = std::make_unique<TApplication>(nullptr);
+    Application->SetDriver(&driver);
+    Application->SetTitle("VCL Demo");
+    Form1 = new TForm1(Application.get());
+    return _tWinMain(hInstance, nullptr, nullptr, 0);
 }
