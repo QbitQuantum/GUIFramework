@@ -1416,11 +1416,23 @@ public:
             e.type = OSEvent::Command;
             sink->OnOSEvent(e);
             break;
-        case CBN_SELCHANGE:
-        case CBN_EDITCHANGE:
         case EN_CHANGE:
+            if (SendMessage(child, EM_GETMODIFY, 0, 0))
+            {
+                e.type = OSEvent::Change;
+                sink->OnOSEvent(e);
+            }
+            break;
+        case CBN_SELCHANGE:
             e.type = OSEvent::Change;
             sink->OnOSEvent(e);
+            break;
+        case CBN_EDITCHANGE:
+            if (GetFocus() == child)
+            {
+                e.type = OSEvent::Change;
+                sink->OnOSEvent(e);
+            }
             break;
         default:
             break;
@@ -1554,7 +1566,8 @@ public:
         combo->AddItem("Новосибирск");
         combo->OnChange() = [combo](TObject*) {
             int idx = combo->SelectedIndex();
-            (void)idx;
+            std::wstring elem = L"Индекс элемента:" + std::to_wstring(idx);
+            ShowMessage(elem.c_str());
             };
 
         auto* edit = new TEdit(this);
@@ -1562,8 +1575,8 @@ public:
         edit->SetBounds(20, 230, 250, 25);
         edit->SetText("Введите текст...");
         edit->OnChange() = [edit](TObject*) {
-            std::string s = edit->Text();
-            (void)s;
+            std::wstring s = Utf8ToW(edit->Text());
+            ShowMessage(s.c_str());
             };
     }
 
