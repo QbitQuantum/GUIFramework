@@ -6,7 +6,6 @@
 #include <functional>
 #include <algorithm>
 #include <cstdint>
-#include <cassert>
 #include <iostream>
 #include <map>
 #include <set>
@@ -56,9 +55,17 @@ namespace vcl {
     // ============================================================================
     //  TComponent — источник истины по ВЛАДЕНИЮ.
     //
-    //  Изменение относительно предыдущей версии: добавлен protected-метод
-    //  ClearOwnedComponents(), чтобы TApplication мог явно разрушить дерево
-    //  в Run() до того, как умрёт драйвер.
+    //  RAII-контракт:
+    //   * FOwnedComponents владеет детьми через unique_ptr.
+    //   * Деструктор TComponent автоматически разрушает всё поддерево.
+    //   * Никаких "явных очисток" снаружи не требуется.
+    //
+    //  Порядок разрушения при выходе из wWinMain:
+    //      ~app    → ~TComponent → FOwnedComponents.clear()
+    //                            → ~TOSControl → ~Win → DestroyWindow
+    //      ~driver → пусто
+    //  Драйвер не владеет окнами и не участвует в их разрушении.
+    //  ~Win не разыменовывает driver — поэтому порядок не критичен.
     // ============================================================================
     class TComponent : public TObject {
         INHERITED(TObject);
@@ -77,22 +84,7 @@ namespace vcl {
             c->FOwner = this;
             FOwnedComponents.emplace_back(c);
         }
-
-        // Явно разрушить всех детей. Введено для TApplication::Run(),
-        // который обязан уничтожить дерево HWND до того, как умрёт драйвер.
-        // Вне TApplication вызывать не нужно — деструктор TComponent
-        // сделает это сам.
-        void ClearOwnedComponents() {
-            // У детей обнуляем FOwner, чтобы они не остались с висячим
-            // указателем на потенциально уже разрушаемый объект.
-            for (auto& c : FOwnedComponents) {
-                if (c) c->FOwner = nullptr;
-            }
-            FOwnedComponents.clear();
-        }
-
     public:
-
         // Владение — здесь. Owner забирает unique_ptr(this).
         explicit TComponent(TComponent* owner) : FOwner(owner) {
             if (!owner) return;
@@ -213,7 +205,12 @@ namespace vcl {
     };
 
     // ============================================================================
-    //  IOSDriver
+    //  IOSDriver — фабрика ресурсов. НЕ владелец окон.
+    //
+    //  Контракт:
+    //   * CreateControl возвращает unique_ptr<IOSHandle> — владение у вызывающего.
+    //   * Драйвер не знает и не должен знать, когда окна разрушаются.
+    //   * Деструктор драйвера не трогает HWND.
     // ============================================================================
     class IOSDriver {
     protected:
@@ -250,7 +247,7 @@ namespace vcl {
     class TControl : public TComponent, public IEventSink {
         INHERITED(TComponent);
     private:
-        
+
         TNotifyEvent FOnClick;
         TNotifyEvent FOnResize;
         TMouseEvent  FOnMouseDown;
@@ -360,6 +357,12 @@ namespace vcl {
 
     // ============================================================================
     //  TOSControl — TControl с HWND.
+    //
+    //  RAII:
+    //   * FHandle — unique_ptr<IOSHandle>, владеет HWND.
+    //   * Деструктор TOSControl неявно вызывает ~unique_ptr → ~Win → DestroyWindow.
+    //   * FDriver — сырой указатель, НЕ владеет. В деструкторе не используется.
+    //   * FChildControls — сырые указатели, НЕ владеет (владение — в TComponent).
     // ============================================================================
     class TOSControl : public TControl {
         INHERITED(TControl);
@@ -390,14 +393,7 @@ namespace vcl {
     public:
         explicit TOSControl(TComponent* owner) : TControl(owner) {}
 
-        ~TOSControl() override {
-            // FHandle — unique_ptr, его деструктор сам вызовет ~Win -> DestroyWindow.
-            // Явный reset() не нужен.
-            //
-            // Важно: драйвер к этому моменту ДОЛЖЕН быть жив. Это гарантирует
-            // TApplication::Run() (разрушает дерево до возврата) и порядок
-            // в wWinMain (driver объявлен до app).
-        }
+        ~TOSControl() override = default;
 
         bool FUpdating = false;
 
@@ -720,51 +716,26 @@ namespace vcl {
     // ============================================================================
     //  TApplication : TComponent — корень дерева владения.
     //
-    //  КОНТРАКТ ВЛАДЕНИЯ ДРАЙВЕРОМ (изменён):
-    //   * TApplication НЕ владеет драйвером. SetDriver принимает сырой
-    //     указатель. Владелец — тот, кто создаёт TApplication.
-    //   * Причина: FDriver — член TApplication, а FOwnedComponents — член
-    //     базового TComponent. C++ разрушает члены производного РАНЬШЕ
-    //     базовых. Значит, при владении драйвером внутри TApplication
-    //     драйвер гарантированно умирал бы раньше дерева HWND.
-    //   * Типичная схема (см. wWinMain):
-    //         auto driver = std::make_unique<TWindowsDriver>(hInstance);
-    //         auto app = std::make_unique<TApplication>(nullptr);
-    //         app->SetDriver(driver.get());   // НЕ владеет
-    //         ... форма и дети ...
-    //         return app->Run();
-    //     Здесь driver объявлен ДО app, значит умрёт ПОСЛЕ app и его дерева.
-    //
-    //  ГАРАНТИЯ ПОРЯДКА:
-    //   * TApplication::Run() перед возвратом явно вызывает
-    //     ClearOwnedComponents(). К моменту выхода из Run() все HWND
-    //     уничтожены, драйвер ещё жив.
-    //   * Если Run() не вызывался (например, пользователь создал app,
-    //     форму, но не запустил цикл) — дерево умрёт в ~TApplication(),
-    //     то есть в ~TComponent, после тела ~TApplication(). Драйвер
-    //     к этому моменту ещё жив (он снаружи), так что порядок соблюдён.
-    //   * Инвариант: к моменту входа в ~TApplication() дерево ПУСТО.
-    //     Если это не так — пользователь нарушил контракт; в debug
-    //     сработает assert.
+    //  RAII-контракт:
+    //   * TApplication владеет формой и всем поддеревом через FOwnedComponents
+    //     (унаследовано от TComponent).
+    //   * Деструктор TApplication = деструктор TComponent — дерево
+    //     разрушается автоматически.
+    //   * Драйвер НЕ принадлежит TApplication. Владелец — вызывающий код
+    //     (обычно стек wWinMain). Порядок разрушения "драйвер ↔ дерево"
+    //     не критичен: ~Win не разыменовывает драйвер.
+    //   * Никаких "явных очисток" (ClearOwnedComponents) и никаких
+    //     assert-контрактов — полагаемся на RAII.
     // ============================================================================
     class TApplication : public TComponent {
         INHERITED(TComponent);
         IOSDriver* FDriver = nullptr;     // НЕ владеет
         TForm* FMainForm = nullptr;       // ссылка; владение — через FOwnedComponents
         std::string FTitle;
-        bool FRan = false;
     public:
         TApplication(TComponent* owner) : TComponent(owner) {}
 
-        ~TApplication() override {
-            // К этому моменту дерево должно быть пусто — либо потому,
-            // что Run() его очистил, либо потому, что его и не было.
-            // Если нет — пользователь нарушил контракт: FDriver уже
-            // (или вот-вот) будет уничтожен снаружи, а дерево ещё живо.
-            assert(OwnedCount() == 0 &&
-                "TApplication destroyed with live components. "
-                "Driver will die before the HWND tree.");
-        }
+        ~TApplication() override = default;
 
         // НЕ владеет. Владелец — вызывающий код.
         void SetDriver(IOSDriver* d) { FDriver = d; }
@@ -775,8 +746,6 @@ namespace vcl {
 
         void SetMainForm(TForm* f) { FMainForm = f; }
         TForm* MainForm() const { return FMainForm; }
-
-        bool Ran() const { return FRan; }
 
         int Run() {
             if (!FDriver) {
@@ -795,16 +764,7 @@ namespace vcl {
             FMainForm->CreateCanvas();
             FMainForm->Show();
 
-            int rc = FDriver->RunMessageLoop();
-
-            // Явно разрушаем дерево, пока драйвер ещё жив.
-            // FHandle каждого контрола вызовет DestroyWindow,
-            // драйвер при этом валиден.
-            FMainForm = nullptr;
-            ClearOwnedComponents();
-
-            FRan = true;
-            return rc;
+            return FDriver->RunMessageLoop();
         }
     };
 
@@ -922,9 +882,7 @@ public:
         int              id = 0;
         bool             isForm = false;
 
-        ~Win() override {
-            sink = nullptr;
-        }
+        ~Win() override = default;
     };
 
     std::set<std::wstring> FRegisteredClasses;
@@ -1086,14 +1044,14 @@ public:
 // ============================================================================
 //  TWindowsDriver
 //
-//  КОНТРАКТ ДЕСТРУКТОРА:
-//   * ~TWindowsDriver НЕ трогает HWND. Это сознательно: порядок
-//     «дерево → драйвер» гарантируется снаружи (см. wWinMain и
-//     TApplication::Run), но драйвер не должен на это рассчитывать,
-//     чтобы оставаться устойчивым к ошибкам пользователя.
+//  КОНТРАКТ:
+//   * Драйвер — фабрика ресурсов. CreateControl отдаёт владение наружу
+//     (unique_ptr<IOSHandle>).
+//   * Драйвер НЕ владеет HWND и НЕ участвует в их разрушении.
+//   * ~TWindowsDriver пуст и не трогает HWND. Порядок "драйвер ↔ дерево"
+//     не критичен: ~Win не разыменовывает driver.
 //   * FRegisteredClasses не снимаются (UnregisterClass не вызывается).
-//     Регистрация ленивая и идемпотентная; повторный RegisterClassExW
-//     для того же имени — no-op.
+//     Регистрация ленивая и идемпотентная.
 // ============================================================================
 class TWindowsDriver : public IOSDriver, public ITWindowsDriver {
 
@@ -1115,9 +1073,7 @@ public:
     void Init() override {
     }
 
-    void Shutdown() override {
-        // Намеренно пусто. См. контракт деструктора выше.
-    }
+    void Shutdown() override { }
 
     std::unique_ptr<IOSHandle> CreateControl(const ControlDesc& d) override {
         HWND parent = d.parent ? static_cast<Win*>(d.parent)->hwnd.get() : nullptr;
@@ -1384,50 +1340,41 @@ public:
 // ============================================================================
 //  wWinMain — точка входа
 //
-//  ПОРЯДОК РАЗРУШЕНИЯ (главное изменение):
-//
-//     auto driver = std::make_unique<TWindowsDriver>(hInstance);  // 1-й
-//     TApplication app(nullptr);                                  // 2-й
-//     app->SetDriver(driver.get());                                // не владеет
-//     ...
-//     return app->Run();
-//
-//  На выходе из wWinMain локальные объекты разрушаются в ОБРАТНОМ порядке
-//  объявления:
-//     ~app       — дерево HWND (через ~TComponent). Драйвер ещё жив.
-//     ~driver    — драйвер. Все HWND уже уничтожены.
-//
-//  Плюс TApplication::Run() сам вызывает ClearOwnedComponents() перед
-//  возвратом, так что даже если app переживёт Run(), дерево уже пусто.
-//
-//  ВЛАДЕНИЕ (без изменений):
+//  RAII-модель владения:
 //   * app (TApplication : TComponent) владеет формой и всем поддеревом.
-//   * form — new TForm(&app). Владение — у app->
+//   * form — new TForm(&app). Владение — у app.
 //   * panel — new TPanel(form). Владение — у form.
 //   * label — new TLabel(panel). Владение — у panel.
 //   * button/chk/combo/edit — new T*(form). Владение — у form.
 //   * SetParent — визуальная иерархия, ЯВНО.
-//   * driver — владение у wWinMain (unique_ptr на стеке). app НЕ владеет.
+//   * driver — владение у wWinMain (стек). app НЕ владеет.
+//
+//  Порядок разрушения на выходе из wWinMain:
+//      ~app    → ~TComponent → FOwnedComponents.clear()
+//                            → ~TOSControl → ~Win → DestroyWindow
+//      ~driver → пусто
+//  Драйвер к моменту DestroyWindow ещё жив, но это НЕ требование:
+//  ~Win не разыменовывает driver. Если поменять порядок объявления
+//  (driver после app) — всё тоже будет корректно.
 //
 //  ДРАЙВЕР:
-//   * hInstance передаётся в конструктор. Никаких SetHInstance снаружи.
-//   * Win::driver — честное per-window поле "кто создал это окно".
+//   * hInstance передаётся в конструктор.
+//   * Win::driver — per-window поле "кто создал окно", не владеет.
 //   * GWLP_USERDATA — единственный индекс HWND -> Win*. Пишется явно
 //     в CreateWin (не из WM_NCCREATE): для системных контролов наш
-//     WndProc не вызывается, и запись из WM_NCCREATE не сработала бы.
-//   * WndProc не знает о глобальном состоянии. FByHwnd нет.
+//     WndProc не вызывается, запись из WM_NCCREATE не сработала бы.
 //   * Регистрация классов окон — ленивая, в CreateControl через EnsureClass.
 //   * ~TWindowsDriver HWND не трогает — сознательно.
 // ============================================================================
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
 
-    // 1. Драйвер создаётся ПЕРВЫМ — значит, умрёт ПОСЛЕДНИМ.
-    auto driver = std::make_unique<TWindowsDriver>(hInstance);
+    // 1. Драйвер создаётся ПЕРВЫМ — умрёт ПОСЛЕДНИМ.
+    //    Это удобно, но НЕ обязательно: ~Win не зависит от driver.
+    TWindowsDriver driver(hInstance);
 
-    // 2. Приложение создаётся ВТОРЫМ — значит, умрёт ПЕРВЫМ,
-    //    вместе со всем деревом HWND.
+    // 2. Приложение создаётся ВТОРЫМ — умрёт ПЕРВЫМ, вместе с деревом HWND.
     auto app = std::make_unique<TApplication>(nullptr);
-    app->SetDriver(driver.get());   // НЕ владеет; driver живёт дольше app
+    app->SetDriver(&driver);   // НЕ владеет; driver живёт дольше app
     app->SetTitle("VCL Demo");
 
     // --- Главная форма. Владеет app. ---
