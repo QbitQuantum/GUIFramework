@@ -1,4 +1,122 @@
-﻿#pragma once
+﻿
+// ============================================================================
+//
+//  OpenRTL — свободное ядро RAD-разработки на C++
+//
+//  «RAD на C++ возможен только в проприетарном инструменте.»
+//  Это утверждение было верно 30 лет. Мы его ломаем.
+//
+// ============================================================================
+//
+//  ЧТО ЭТО
+//  --------
+//
+//  OpenRTL — это свободная реализация ядра RTL/VCL-парадигмы
+//  на стандартном C++ (C++17/20), без проприетарных компиляторов,
+//  без закрытых библиотек, без лицензионных замков.
+//
+//  Это не «ещё один GUI-фреймворк»
+//
+//  ЧТО РЕАЛИЗОВАНО
+//  --------------
+//
+//  RTL-ядро:
+//    - TObject            корень иерархии, ручной RTTI
+//                         (ClassName, InheritsFrom)
+//    - Exception          Message, HelpContext, InnerException,
+//                         GetBaseException, StackTrace
+//    - ERuntimeError      иерархия исключений в стиле RTL
+//    - EInvalidArgument
+//    - EConvertError
+//    - INHERITED(Base)    макрос для inherited:: в стиле Object Pascal
+//    - TComponent         владение через FOwner + FOwnedComponents
+//
+//  VCL-слой:
+//    - TControl → TOSControl → TCustomForm → TForm → TForm1
+//    - события: TNotifyEvent, TCloseEvent, TMouseEvent, TKeyEvent
+//    - контролы: TPanel, TLabel, TButton, TCheckBox, TEdit, TComboBox
+//    - визуальная иерархия (FChildControls, FParent) отделена
+//      от владения (FOwner, FOwnedComponents)
+//
+//  Платформенный адаптер:
+//    - IOSDriver / IOSHandle / IEventSink / OSEvent — bridge pattern
+//    - TWindowsDriver — честный Win32 API под капотом:
+//        CreateWindowExW, WndProc, GWLP_USERDATA, WM_PAINT, WM_COMMAND
+//    - TCanvas — абстракция рисования (сейчас GDI, дальше — GDI+/Direct2D)
+//
+//  IDE-стиль:
+//    - Application, Form1, _tWinMain — как в сгенерированном коде
+//    - конструктор TForm1 создаёт контролы через
+//      new + SetParent + SetBounds
+//    - события вешаются лямбдами вместо __published методов
+//    - TApplication::CreateForm + Run + RunMessageLoop
+//
+// ============================================================================
+//
+//  ЧТО ПОД КАПОТОМ
+//  --------------
+//
+//    Win32 message
+//        → WndProc
+//            → Win* (GWLP_USERDATA)
+//                → ITWindowsDriver::OnXxx()
+//                    → Emit() → IEventSink::OnOSEvent(OSEvent)
+//                        → TControl::OnOSEvent / TOSControl::OnOSEvent
+//                            → FOnClick / FOnChange / FOnKeyDown
+//
+//  Ты можешь ткнуть пальцем в любую строчку этой цепочки
+//  и сказать: «вот здесь приходит WM_PAINT, вот здесь он превращается
+//  в OSEvent::Paint, вот здесь вызывается OnPaint формы,
+//  вот здесь PaintTree рисует детей».
+//
+//
+// ============================================================================
+//
+//  ПОЧЕМУ ЭТО ВАЖНО
+//  ----------------
+//
+//  Embarcadero продаёт лицензии на C++Builder за $1000–$4000.
+//  Их главный актив — не технология, а монополия на RAD-разработку
+//  на C++. Они держат рынок не потому, что «мы лучшие», а потому что
+//  «альтернативы нет».
+//
+//  OpenRTL создаёт альтернативу. Даже если она хуже — она есть.
+//  А это уже ломает монополию. Потому что после появления альтернативы
+//  невозможно сказать «RAD на C++ — это только C++Builder».
+//
+// ============================================================================
+//
+//  ЧТО ДАЛЬШЕ
+//  ----------
+//
+//    [ ] DFM-парсер (замок №3)
+//    [ ] конвертер DFM → нативный формат
+//    [ ] __published-эмуляция через макросы
+//    [ ] TInterfacedObject с подсчётом ссылок
+//    [ ] TThread + Synchronize + интеграция с message loop
+//    [ ] TStringList, TList, TDictionary
+//    [ ] TRegistry, TIniFile
+//    [ ] RTTI-таблица с published-свойствами
+//    [ ] визуальный дизайнер форм (замок №4)
+//    [ ] GTK4-драйвер (кроссплатформенность)
+//    [ ] Cocoa-драйвер
+//    [ ] совместимость с VCL-компонентами (замок №5)
+//
+// ============================================================================
+//
+//  ЛИЦЕНЗИЯ
+//  --------
+//
+//  MIT
+//
+//  Никаких торговых марок Embarcadero. Имена классов (TObject,
+//  TComponent, TForm) — общеупотребительные в мире RAD-разработки.
+//  Мы не используем код Embarcadero. Мы воспроизводим идеи —
+//  а идеи не защищены.
+//
+// ============================================================================
+
+#pragma once
 
 #include <string>
 #include <vector>
