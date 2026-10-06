@@ -502,8 +502,6 @@ namespace vcl {
         
         ~TOSControl() override = default;
 
-        bool FUpdating = false;
-
         TCloseEvent& OnClose() { return FOnClose; }
         TNotifyEvent& OnChange() { return FOnChange; }
         TKeyEvent& OnKeyDown() { return FOnKeyDown; }
@@ -599,7 +597,7 @@ namespace vcl {
                 break;
             }
             case OSEvent::Change:
-                if (!FUpdating && FOnChange) FOnChange(this);
+                if (FOnChange) FOnChange(this);
                 break;
             case OSEvent::Show:      FVisible = true;  break;
             case OSEvent::Hide:      FVisible = false; break;
@@ -730,9 +728,7 @@ namespace vcl {
         ControlKind Kind() const override { return ControlKind::CheckBox; }
 
         void SetChecked(bool c) {
-            FUpdating = true;
             if (FHandle) FDriver->SetCheck(FHandle.get(), c);
-            FUpdating = false;
         }
         bool Checked() const {
             return FHandle ? FDriver->GetCheck(FHandle.get()) : false;
@@ -789,19 +785,14 @@ namespace vcl {
             return FHandle ? FDriver->GetSel(FHandle.get()) : -1;
         }
         void SetSelectedIndex(int i) {
-            FUpdating = true;
             if (FHandle) FDriver->SetSel(FHandle.get(), i);
-            FUpdating = false;
         }
 
         void CreateHandle(IOSHandle* parentHandle) override {
             inherited::CreateHandle(parentHandle);
             if (!FHandle) return;
-            FUpdating = true;
             for (auto& s : FPending) FDriver->AddString(FHandle.get(), s);
             if (!FPending.empty()) FDriver->SetSel(FHandle.get(), 0);
-            FUpdating = false;
-            FPending.clear();
         }
 
         const char* ClassName() const override { return "TComboBox"; }
