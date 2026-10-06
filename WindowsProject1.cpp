@@ -983,7 +983,6 @@ public:
         IEventSink* sink = nullptr;
         ControlKind      kind = ControlKind::Panel;
         int              id = 0;
-        bool             isForm = false;
 
         ~Win() override = default;
     };
@@ -1033,7 +1032,6 @@ public:
         win->driver = this;
         win->kind = d.kind;
         win->id = d.id;
-        win->isForm = (d.kind == ControlKind::Form);
         win->sink = d.sink;
 
         win->hwnd.reset(::CreateWindowExW(
