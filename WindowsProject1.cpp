@@ -1606,68 +1606,141 @@ class TForm1 : public TForm {
     INHERITED(TForm);
 public:
     explicit TForm1(TComponent* owner) : TForm(owner) {
-        SetCaption("Hello VCL (Win32)");
-        SetBounds(200, 200, 480, 320);
+        SetCaption("VCL Demo — Enhanced");
+        SetBounds(200, 200, 520, 400);
 
-        OnClose() = [](TObject*, bool& CanClose) {
+        auto* header = new TPanel(this);
+        header->SetParent(this);
+        header->SetBounds(0, 0, 520, 50);
+        header->SetCaption("");
+
+        auto* title = new TLabel(header);
+        title->SetParent(header);
+        title->SetBounds(16, 14, 480, 24);
+        title->SetCaption("OpenRTL / VCL Demonstration");
+
+        auto* greetLabel = new TLabel(this);
+        greetLabel->SetParent(this);
+        greetLabel->SetBounds(20, 70, 480, 24);
+        greetLabel->SetCaption("Enter your name and click \"Greet\".");
+
+        auto* nameEdit = new TEdit(this);
+        nameEdit->SetParent(this);
+        nameEdit->SetBounds(20, 105, 320, 26);
+        nameEdit->SetText("");
+
+        auto* greetBtn = new TButton(this);
+        greetBtn->SetParent(this);
+        greetBtn->SetBounds(350, 105, 150, 26);
+        greetBtn->SetCaption("Greet");
+
+        auto* politeChk = new TCheckBox(this);
+        politeChk->SetParent(this);
+        politeChk->SetBounds(20, 145, 300, 24);
+        politeChk->SetCaption("Polite form (formal \"you\")");
+        politeChk->SetChecked(true);
+
+        auto* cityLabel = new TLabel(this);
+        cityLabel->SetParent(this);
+        cityLabel->SetBounds(20, 185, 120, 24);
+        cityLabel->SetCaption("City:");
+
+        auto* cityCombo = new TComboBox(this);
+        cityCombo->SetParent(this);
+        cityCombo->SetBounds(140, 182, 260, 200);
+        cityCombo->AddItem("Moscow");
+        cityCombo->AddItem("Saint Petersburg");
+        cityCombo->AddItem("Novosibirsk");
+        cityCombo->AddItem("Yekaterinburg");
+        cityCombo->AddItem("Kazan");
+        cityCombo->SetSelectedIndex(0);
+
+        auto* clearBtn = new TButton(this);
+        clearBtn->SetParent(this);
+        clearBtn->SetBounds(20, 230, 150, 30);
+        clearBtn->SetCaption("Clear");
+
+        auto* exitBtn = new TButton(this);
+        exitBtn->SetParent(this);
+        exitBtn->SetBounds(180, 230, 150, 30);
+        exitBtn->SetCaption("Exit");
+
+        auto* status = new TLabel(this);
+        status->SetParent(this);
+        status->SetBounds(20, 275, 480, 24);
+        status->SetCaption("Ready.");
+
+        auto dirty = std::make_shared<bool>(false);
+
+        OnClose() = [dirty](TObject*, bool& CanClose) {
+            if (!*dirty) {
+                CanClose = false;
+                return;
+            }
             int r = MessageBoxW(nullptr,
-                L"Точно закрыть приложение?",
-                L"Подтверждение",
+                L"There is unsaved data. Close the application?",
+                L"Confirmation",
                 MB_YESNO | MB_ICONQUESTION);
-            CanClose = r == IDNO;
+            CanClose = (r == IDNO);
             };
 
-        auto* panel = new TPanel(this);
-        panel->SetParent(this);
-        panel->SetBounds(10, 10, 460, 80);
-
-        auto* label = new TLabel(panel);
-        label->SetParent(panel);
-        label->SetBounds(20, 30, 400, 24);
-        label->SetCaption("Press the button!");
-
-        auto* button = new TButton(this);
-        button->SetParent(this);
-        button->SetBounds(20, 120, 160, 40);
-        button->SetCaption("Click me");
-        button->OnClick() = [label](TObject*) {
-            label->SetCaption("Clicked at " + std::to_string(GetTickCount64()));
+        auto updateGreeting = [=]() {
+            std::string name = nameEdit->Text();
+            if (name.empty()) {
+                greetLabel->SetCaption("Enter your name and click \"Greet\".");
+                return;
+            }
+            std::string city = cityCombo->GetString(cityCombo->SelectedIndex());
+            std::string who = politeChk->GetCheck() ? "Hello, " : "Hi, ";
+            std::string you = politeChk->GetCheck() ? "!" : "!";
+            greetLabel->SetCaption(who + name + you + "  (city: " + city + ")");
+            *dirty = true;
             };
 
-        auto* chk = new TCheckBox(this);
-        chk->SetParent(this);
-        chk->SetBounds(200, 120, 200, 30);
-        chk->SetCaption("Check me");
-        chk->OnClick() = [chk](TObject*) {
-            std::wstring state = chk->GetCheck() ? L"Checked!" : L"Unchecked";
-            ShowMessage(state.c_str());
+        auto showStatus = [=](const std::string& prefix) {
+            std::string name = nameEdit->Text();
+            status->SetCaption(prefix
+                + " | name: \"" + (name.empty() ? std::string("<empty>") : name)
+                + "\" | city: " + cityCombo->GetString(cityCombo->SelectedIndex())
+                + " | polite: " + (politeChk->GetCheck() ? "yes" : "no"));
             };
 
-        auto* combo = new TComboBox(this);
-        combo->SetParent(this);
-        combo->SetBounds(20, 180, 200, 200);
-        combo->AddItem("Москва");
-        combo->AddItem("Петербург");
-        combo->AddItem("Новосибирск");
-        combo->OnChange() = [combo](TObject*) {
-            int idx = combo->SelectedIndex();
-            std::wstring elem = L"Индекс элемента:" + std::to_wstring(idx);
-            ShowMessage(elem.c_str());
+        greetBtn->OnClick() = [=](TObject*) {
+            updateGreeting();
+            showStatus("Greeting generated");
             };
 
-        auto* edit = new TEdit(this);
-        edit->SetParent(this);
-        edit->SetBounds(20, 230, 250, 25);
-        edit->SetText("Введите текст...");
-        edit->OnChange() = [edit](TObject*) {
-            std::wstring s = Utf8ToW(edit->Text());
-            ShowMessage(s.c_str());
+        clearBtn->OnClick() = [=](TObject*) {
+            nameEdit->SetText("");
+            politeChk->SetChecked(false);
+            cityCombo->SetSelectedIndex(0);
+            greetLabel->SetCaption("Enter your name and click \"Greet\".");
+            status->SetCaption("Cleared.");
+            *dirty = false;
+            };
+
+        nameEdit->OnChange() = [=](TObject*) {
+            *dirty = true;
+            showStatus("Input");
+            };
+
+        politeChk->OnClick() = [=](TObject*) {
+            *dirty = true;
+            updateGreeting();
+            showStatus("Mode changed");
+            };
+
+        cityCombo->OnChange() = [=](TObject*) {
+            *dirty = true;
+            updateGreeting();
+            showStatus("City changed");
             };
     }
 
     void PaintTree(TCanvas* c) override {
         if (!c) return;
-        c->Line(0, 0, 400, 400);
+        c->SetColor(TColor::FromRGB(0, 120, 215));
+        c->Line(0, 50, 520, 50);
         inherited::PaintTree(c);
     }
 
