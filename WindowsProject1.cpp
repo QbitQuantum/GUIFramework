@@ -714,12 +714,6 @@ namespace vcl {
         void Show() { inherited::SetVisible(true); }
         void Hide() { inherited::SetVisible(false); }
 
-        void PaintTree(TCanvas* c) override {
-            if (!c) return;
-            c->Line(0, 0, 400, 400);
-            inherited::PaintTree(c);
-        }
-
         const char* ClassName() const override { return "TForm"; }
         bool InheritsFrom(const char* cls) const override {
             return std::string(cls) == "TForm" || inherited::InheritsFrom(cls);
@@ -1665,6 +1659,12 @@ public:
             std::wstring s = Utf8ToW(edit->Text());
             ShowMessage(s.c_str());
             };
+    }
+
+    void PaintTree(TCanvas* c) override {
+        if (!c) return;
+        c->Line(0, 0, 400, 400);
+        inherited::PaintTree(c);
     }
 
     ~TForm1() override = default;
