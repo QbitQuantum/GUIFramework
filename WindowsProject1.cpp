@@ -1462,8 +1462,9 @@ public:
         chk->SetParent(this);
         chk->SetBounds(200, 120, 200, 30);
         chk->SetCaption("Check me");
-        chk->OnChange() = [chk](TObject*) {
-            (void)chk->Checked();
+        chk->OnClick() = [chk](TObject*) {
+            std::wstring state = chk->Checked() ? L"Checked!" : L"Unchecked";
+            ShowMessage(state.c_str());
             };
 
         auto* combo = new TComboBox(this);
