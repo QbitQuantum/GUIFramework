@@ -721,6 +721,7 @@ namespace vcl {
 
     class TCheckBox : public TOSControl {
         INHERITED(TOSControl);
+        bool IsCheked = false;
     public:
         explicit TCheckBox(TComponent* owner) : TOSControl(owner) {}
         ~TCheckBox() override = default;
@@ -728,10 +729,11 @@ namespace vcl {
         ControlKind Kind() const override { return ControlKind::CheckBox; }
 
         void SetChecked(bool c) {
-            if (FHandle) FDriver->SetCheck(FHandle.get(), c);
+            IsCheked = c;
+            if (FHandle) FDriver->SetCheck(FHandle.get(), IsCheked);
         }
-        bool Checked() const {
-            return FHandle ? FDriver->GetCheck(FHandle.get()) : false;
+        bool GetCheck() const {
+            return FHandle ? FDriver->GetCheck(FHandle.get()) : IsCheked;
         }
 
         const char* ClassName() const override { return "TCheckBox"; }
@@ -755,6 +757,7 @@ namespace vcl {
 
         void SetText(const std::string& s) {
             FText = s;
+            if (FHandle) FDriver->SetText(FHandle.get(), s);
         }
 
         void CreateHandle(IOSHandle* parentHandle) override {
@@ -1468,7 +1471,7 @@ public:
         chk->SetBounds(200, 120, 200, 30);
         chk->SetCaption("Check me");
         chk->OnClick() = [chk](TObject*) {
-            std::wstring state = chk->Checked() ? L"Checked!" : L"Unchecked";
+            std::wstring state = chk->GetCheck() ? L"Checked!" : L"Unchecked";
             ShowMessage(state.c_str());
             };
 
