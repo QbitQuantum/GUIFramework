@@ -1,87 +1,25 @@
-﻿
-// ============================================================================
+﻿// ============================================================================
 //
 //  OpenRTL — свободное ядро RAD-разработки на C++
 //
 // ============================================================================
 //
-//  ЧТО ЭТО
-//  --------
+//  АРХИТЕКТУРНЫЕ ИНВАРИАНТЫ
+//  -----------------------
 //
-//  OpenRTL — это свободная реализация ядра RTL/VCL-парадигмы
-//  на стандартном C++ (C++17/20), без проприетарных компиляторов,
-//  без закрытых библиотек, без лицензий
+//    1. TControl : public TComponent — БЕЗ двойного наследования.
 //
-//  ЧТО РЕАЛИЗОВАНО
-//  --------------
+//    2. TEventDispatcher — поле внутри TControl, реализует IEventSink.
+//       Драйверу отдаётся &control->Dispatcher().
 //
-//  RTL-ядро:
-//    - TObject            корень иерархии, ручной RTTI
-//                         (ClassName, InheritsFrom)
-//    - Exception          Message, HelpContext, InnerException,
-//                         GetBaseException, StackTrace
-//    - ERuntimeError      иерархия исключений в стиле RTL
-//    - EInvalidArgument
-//    - EConvertError
-//    - INHERITED(Base)    макрос для inherited:: в стиле Object Pascal
-//    - TComponent         владение через FOwner + FOwnedComponents
+//    3. Один forward declaration class TControl; — диспатчеру нужен
+//       только указатель, не определение. Это стандартная практика C++.
 //
-//  VCL-слой:
-//    - TControl → TOSControl → TCustomForm → TForm → TForm1
-//    - события: TNotifyEvent, TCloseEvent, TMouseEvent, TKeyEvent
-//    - контролы: TPanel, TLabel, TButton, TCheckBox, TEdit, TComboBox
-//    - визуальная иерархия (FChildControls, FParent) отделена
-//      от владения (FOwner, FOwnedComponents)
+//    4. TControl::OnOSEvent — virtual. Наследники переопределяют
+//       через inherited::OnOSEvent, как в оригинале.
 //
-//  Платформенный адаптер:
-//    - IOSDriver / IOSHandle / IEventSink / OSEvent — bridge pattern
-//    - TWindowsDriver — честный Win32 API под капотом:
-//        CreateWindowExW, WndProc, GWLP_USERDATA, WM_PAINT, WM_COMMAND
-//    - TCanvas — абстракция рисования (сейчас GDI, дальше — GDI+/Direct2D)
-//
-//  IDE-стиль:
-//    - Application, Form1, _tWinMain — как в сгенерированном коде
-//    - конструктор TForm1 создаёт контролы через
-//      new + SetParent + SetBounds
-//    - события вешаются лямбдами вместо __published методов
-//    - TApplication::CreateForm + Run + RunMessageLoop
-//
-// ============================================================================
-//
-//  ЧТО ПОД КАПОТОМ
-//  --------------
-//
-//    Win32 message
-//        → WndProc
-//            → Win* (GWLP_USERDATA)
-//                → ITWindowsDriver::OnXxx()
-//                    → Emit() → IEventSink::OnOSEvent(OSEvent)
-//                        → TControl::OnOSEvent / TOSControl::OnOSEvent
-//                            → FOnClick / FOnChange / FOnKeyDown
-//
-//  Ты можешь ткнуть пальцем в любую строчку этой цепочки
-//  и сказать: «вот здесь приходит WM_PAINT, вот здесь он превращается
-//  в OSEvent::Paint, вот здесь вызывается OnPaint формы,
-//  вот здесь PaintTree рисует детей».
-//
-//
-// ============================================================================
-//
-//  ЧТО ДАЛЬШЕ
-//  ----------
-//
-//    [ ] DFM-парсер (замок №3)
-//    [ ] конвертер DFM → нативный формат
-//    [ ] __published-эмуляция через макросы
-//    [ ] TInterfacedObject с подсчётом ссылок
-//    [ ] TThread + Synchronize + интеграция с message loop
-//    [ ] TStringList, TList, TDictionary
-//    [ ] TRegistry, TIniFile
-//    [ ] RTTI-таблица с published-свойствами
-//    [ ] визуальный дизайнер форм (замок №4)
-//    [ ] GTK4-драйвер (кроссплатформенность)
-//    [ ] Cocoa-драйвер
-//    [ ] совместимость с VCL-компонентами (замок №5)
+//    5. IOSHandle — мост. Sink едет в ControlDesc и оседает в handle.
+//       SetEventSink из IOSDriver убран.
 //
 // ============================================================================
 //
@@ -372,6 +310,7 @@ namespace vcl {
         bool enabled = true;
         int  id = 0;
         IOSHandle* parent = nullptr;
+        IEventSink* sink = nullptr;
     };
 
     // ============================================================================
@@ -384,9 +323,9 @@ namespace vcl {
     public:
         virtual ~IOSDriver() = default;
 
-        virtual std::unique_ptr<IOSHandle>
+        virtual std::unique_ptr<IOSHandle> 
             CreateControl(const ControlDesc& d) = 0;
-        virtual std::unique_ptr<TCanvas>
+        virtual std::unique_ptr<TCanvas>  
             CreateCanvas(IOSHandle* h) = 0;
 
         virtual const char* Name() const = 0;
@@ -403,13 +342,36 @@ namespace vcl {
         virtual void AddString(IOSHandle* h, const std::string& s) = 0;
         virtual void SetSel(IOSHandle* h, int idx) = 0;
         virtual int  GetSel(IOSHandle* h) const = 0;
-        virtual void SetEventSink(IOSHandle* h, IEventSink* sink) = 0;
+    };
+
+    // ============================================================================
+    //  TEventDispatcher — поле TControl, реализует IEventSink.
+    // ============================================================================
+    class TEventDispatcher final : public IEventSink {
+        using TNotify = std::function<void(OSEvent&)>;
+    public:
+        
+        TEventDispatcher() = default;
+        ~TEventDispatcher() override = default;
+
+        TEventDispatcher(const TEventDispatcher&) = delete;
+        TEventDispatcher& operator=(const TEventDispatcher&) = delete;
+
+        void SetNotify(TNotify n) { FNotify = std::move(n); }
+        void ClearNotify() { FNotify = nullptr; }
+
+        void OnOSEvent(OSEvent& e) override {
+            if (FNotify) FNotify(e);
+        }
+
+    private:
+        TNotify FNotify;
     };
 
     // ============================================================================
     //  TControl
     // ============================================================================
-    class TControl : public TComponent, public IEventSink {
+    class TControl : public TComponent {
         INHERITED(TComponent);
     private:
 
@@ -435,9 +397,12 @@ namespace vcl {
         std::string FCaption;
 
         TControl* FParent = nullptr;              // визуальный, НЕ владеет
+        TEventDispatcher FDispatcher;
 
     public:
-        explicit TControl(TComponent* owner) : TComponent(owner) {}
+        explicit TControl(TComponent* owner) : TComponent(owner) {
+            FDispatcher.SetNotify([this](OSEvent& e) { OnOSEvent(e); });
+        }
 
         ~TControl() override = default;
 
@@ -479,6 +444,8 @@ namespace vcl {
         TMouseEvent& OnMouseUp() { return FOnMouseUp; }
         TMouseEvent& OnMouseMove() { return FOnMouseMove; }
 
+        TEventDispatcher& Dispatcher() { return FDispatcher; }
+
         virtual void OnMove() {}
         virtual void OnVisibleChanged() {}
         virtual void OnPaint(TCanvas* Canvas) {}
@@ -489,7 +456,8 @@ namespace vcl {
             return std::string(cls) == "TControl" || inherited::InheritsFrom(cls);
         }
 
-        void OnOSEvent(OSEvent& e) override {
+        // Виртуальный вход для событий. Диспатчер зовёт его.
+        virtual void OnOSEvent(OSEvent& e) {
             switch (e.type) {
             case OSEvent::MouseDown:
                 if (FOnMouseDown) FOnMouseDown(this, ToButton(e.button), 0, e.x, e.y);
@@ -517,7 +485,6 @@ namespace vcl {
             case OSEvent::Hide:      FVisible = false; break;
             }
         }
-
     };
 
     // ============================================================================
@@ -551,7 +518,7 @@ namespace vcl {
 
     public:
         explicit TOSControl(TComponent* owner) : TControl(owner) {}
-
+        
         ~TOSControl() override = default;
 
         bool FUpdating = false;
@@ -593,11 +560,11 @@ namespace vcl {
             d.enabled = FEnabled;
             d.id = FId;
             d.parent = parentHandle;
+            d.sink = &Dispatcher();
 
             FHandle = FDriver->CreateControl(d);
             if (!FHandle) return;
 
-            FDriver->SetEventSink(FHandle.get(), this);
             FDriver->SetText(FHandle.get(), FCaption);
             FDriver->SetVisible(FHandle.get(), FVisible);
             FDriver->SetEnabled(FHandle.get(), FEnabled);
@@ -933,9 +900,6 @@ namespace vcl {
 // ============================================================================
 #if defined(_WIN32)
 
-// ============================================================================
-//  UTF-8 <-> UTF-16 helpers — ВЫНЕСЕНЫ ВЫШЕ, чтобы их видел ShowException.
-// ============================================================================
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
 #  endif
@@ -1089,6 +1053,7 @@ public:
         win->kind = d.kind;
         win->id = d.id;
         win->isForm = (d.kind == ControlKind::Form);
+        win->sink = d.sink;
 
         win->hwnd.reset(::CreateWindowExW(
             exStyle, cls, Utf8ToW(d.caption).c_str(), style,
@@ -1204,7 +1169,7 @@ public:
     }
 
     ~TWindowsDriver() override {
-        Shutdown();
+        Shutdown(); 
     }
 
     TWindowsDriver(const TWindowsDriver&) = delete;
@@ -1352,12 +1317,6 @@ public:
         return (int)SendMessageW(win->hwnd.get(), CB_GETCURSEL, 0, 0);
     }
 
-    void SetEventSink(IOSHandle* h, IEventSink* sink) override {
-        auto* w = static_cast<Win*>(h);
-        if (!w) return;
-        w->sink = sink;
-    }
-
     static IEventSink* SinkForHwnd(HWND h) {
         Win* w = WinOf(h);
         return w ? w->sink : nullptr;
@@ -1393,7 +1352,7 @@ public:
             sink->OnOSEvent(e);
             break;
         case EN_CHANGE:
-            if (SendMessage(child, EM_GETMODIFY, 0, 0))
+            if (SendMessage(child, EM_GETMODIFY, 0, 0)) 
             {
                 e.type = OSEvent::Change;
                 sink->OnOSEvent(e);
@@ -1404,7 +1363,7 @@ public:
             sink->OnOSEvent(e);
             break;
         case CBN_EDITCHANGE:
-            if (GetFocus() == child)
+            if (GetFocus() == child) 
             {
                 e.type = OSEvent::Change;
                 sink->OnOSEvent(e);
@@ -1445,7 +1404,7 @@ public:
         return e.cancel;
     }
 
-    void OnPaint(HWND, Win* w, HDC dc) override {
+    void OnPaint(HWND, Win* w, HDC) override {
         Emit(w, OSEvent::Paint, [](OSEvent&) {});
     }
 
