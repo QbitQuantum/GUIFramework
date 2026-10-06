@@ -746,6 +746,7 @@ namespace vcl {
 
     class TEdit : public TOSControl {
         INHERITED(TOSControl);
+        std::string FText = "";
     public:
         explicit TEdit(TComponent* owner) : TOSControl(owner) {}
         ~TEdit() override = default;
@@ -755,10 +756,14 @@ namespace vcl {
         std::string Text() const {
             return FHandle ? FDriver->GetText(FHandle.get()) : std::string{};
         }
+
         void SetText(const std::string& s) {
-            FUpdating = true;
-            if (FHandle) FDriver->SetText(FHandle.get(), s);
-            FUpdating = false;
+            FText = s;
+        }
+
+        void CreateHandle(IOSHandle* parentHandle) override {
+            inherited::CreateHandle(parentHandle);
+            if (FHandle) FDriver->SetText(FHandle.get(), FText);
         }
 
         const char* ClassName() const override { return "TEdit"; }
