@@ -985,62 +985,7 @@ public:
         ~Win() override = default;
     };
 
-    std::set<std::wstring> FRegisteredClasses;
-    HINSTANCE              FInst = nullptr;
-    int                    FNextId = 1000;
-
     virtual ~ITWindowsDriver() = default;
-
-    static void AttachWin(HWND hwnd, Win* w) {
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)w);
-    }
-    static Win* WinOf(HWND hwnd) {
-        return reinterpret_cast<Win*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-    }
-
-    void EnsureClass(const wchar_t* cls) {
-        if (!cls) return;
-        if (FRegisteredClasses.count(cls)) return;
-
-        WNDCLASSEXW wc{};
-        wc.cbSize = sizeof(wc);
-        wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
-        wc.lpfnWndProc = &ITWindowsDriver::WndProc;
-        wc.hInstance = FInst;
-        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-        wc.hbrBackground = nullptr;
-        wc.lpszClassName = cls;
-
-        if (!RegisterClassExW(&wc) &&
-            GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-            return;
-        }
-
-        FRegisteredClasses.insert(cls);
-    }
-
-    std::unique_ptr<Win> CreateWin(const ControlDesc& d,
-        const wchar_t* cls,
-        DWORD style, DWORD exStyle,
-        HWND parent,
-        int x, int y, int w, int h,
-        int ctrlId)
-    {
-        auto win = std::make_unique<Win>();
-        win->driver = this;
-        win->kind = d.kind;
-        win->sink = d.sink;
-
-        win->hwnd.reset(::CreateWindowExW(
-            exStyle, cls, Utf8ToW(d.caption).c_str(), style,
-            x, y, w, h, parent, (HMENU)(INT_PTR)ctrlId,
-            FInst, nullptr));
-
-        if (!win->hwnd) return nullptr;
-
-        AttachWin(win->hwnd.get(), win.get());
-        return win;
-    }
 
     virtual void OnCommand(HWND, Win*, WORD, HWND, WORD) {}
     virtual void OnPaint(HWND, Win*, HDC) {}
@@ -1054,6 +999,13 @@ public:
     virtual void OnMouseMove(HWND, Win*, int, int) {}
     virtual void OnKeyDown(HWND, Win*, int) {}
     virtual void OnKeyUp(HWND, Win*, int) {}
+
+    static void AttachWin(HWND hwnd, Win* w) {
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)w);
+    }
+    static Win* WinOf(HWND hwnd) {
+        return reinterpret_cast<Win*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    }
 
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         Win* w = WinOf(hwnd);
@@ -1137,6 +1089,54 @@ public:
 //  TWindowsDriver
 // ============================================================================
 class TWindowsDriver : public IOSDriver, public ITWindowsDriver {
+
+    std::set<std::wstring> FRegisteredClasses;
+    HINSTANCE              FInst = nullptr;
+    int                    FNextId = 1000;
+
+    void EnsureClass(const wchar_t* cls) {
+        if (!cls) return;
+        if (FRegisteredClasses.count(cls)) return;
+
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+        wc.lpfnWndProc = &ITWindowsDriver::WndProc;
+        wc.hInstance = FInst;
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.hbrBackground = nullptr;
+        wc.lpszClassName = cls;
+
+        if (!RegisterClassExW(&wc) &&
+            GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            return;
+        }
+
+        FRegisteredClasses.insert(cls);
+    }
+
+    std::unique_ptr<Win> CreateWin(const ControlDesc& d,
+        const wchar_t* cls,
+        DWORD style, DWORD exStyle,
+        HWND parent,
+        int x, int y, int w, int h,
+        int ctrlId)
+    {
+        auto win = std::make_unique<Win>();
+        win->driver = this;
+        win->kind = d.kind;
+        win->sink = d.sink;
+
+        win->hwnd.reset(::CreateWindowExW(
+            exStyle, cls, Utf8ToW(d.caption).c_str(), style,
+            x, y, w, h, parent, (HMENU)(INT_PTR)ctrlId,
+            FInst, nullptr));
+
+        if (!win->hwnd) return nullptr;
+
+        AttachWin(win->hwnd.get(), win.get());
+        return win;
+    }
 
 public:
     explicit TWindowsDriver(HINSTANCE hInstance) {
