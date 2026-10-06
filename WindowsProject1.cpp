@@ -821,6 +821,10 @@ namespace vcl {
             if (FHandle) FDriver->SetSel(FHandle.get(), i);
         }
 
+        std::string GetString(int idx) const {
+            return FHandle ? FDriver->GetString(FHandle.get(), idx) : std::string{};
+        }
+
         void CreateHandle(IOSHandle* parentHandle) override {
             inherited::CreateHandle(parentHandle);
             if (!FHandle) return;
