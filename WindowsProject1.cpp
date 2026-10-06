@@ -1216,89 +1216,94 @@ public:
         return CreateWin(d, cls, style, exStyle, parent, x, y, ww, hh, ctrlId);
     }
 
-    void SetBounds(IOSHandle* h, int l, int t, int w, int ht) override {
+    inline static HWND HwndOf(IOSHandle* h) noexcept {
         auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return;
-        ::SetWindowPos(win->hwnd.get(), nullptr, l, t, w, ht,
+        if (!win) return nullptr;
+        return win->hwnd.get();
+    }
+
+    void SetBounds(IOSHandle* h, int l, int t, int w, int ht) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::SetWindowPos(hwnd, nullptr, l, t, w, ht,
             SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     void SetVisible(IOSHandle* h, bool v) override {
-        auto* win = static_cast<Win*>(h);
-        if (!win) return;
-        if (win->hwnd) ::ShowWindow(win->hwnd.get(), v ? SW_SHOW : SW_HIDE);
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::ShowWindow(hwnd, v ? SW_SHOW : SW_HIDE);
     }
 
     void SetText(IOSHandle* h, const std::string& text) override {
-        auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return;
-        ::SetWindowTextW(win->hwnd.get(), Utf8ToW(text).c_str());
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::SetWindowTextW(hwnd, Utf8ToW(text).c_str());
     }
 
     std::string GetText(IOSHandle* h) const override {
-        auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return {};
-        int len = GetWindowTextLengthW(win->hwnd.get());
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return {};
+        int len = GetWindowTextLengthW(hwnd);
         if (len <= 0) return {};
         std::wstring s(len + 1, L'\0');
-        int got = GetWindowTextW(win->hwnd.get(), &s[0], len + 1);
+        int got = GetWindowTextW(hwnd, &s[0], len + 1);
         s.resize(got > 0 ? got : 0);
         return WToUtf8(s);
     }
 
     void SetEnabled(IOSHandle* h, bool e) override {
-        auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return;
-        ::EnableWindow(win->hwnd.get(), e ? TRUE : FALSE);
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::EnableWindow(hwnd, e ? TRUE : FALSE);
     }
 
     void Invalidate(IOSHandle* h) override {
-        auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return;
-        ::InvalidateRect(win->hwnd.get(), nullptr, TRUE);
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::InvalidateRect(hwnd, nullptr, TRUE);
     }
 
     void SetCheck(IOSHandle* h, bool c) override {
-        auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return;
-        SendMessageW(win->hwnd.get(), BM_SETCHECK,
-            c ? BST_CHECKED : BST_UNCHECKED, 0);
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        SendMessageW(hwnd, BM_SETCHECK, c ? BST_CHECKED : BST_UNCHECKED, 0);
     }
 
     bool GetCheck(IOSHandle* h) const override {
-        auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return false;
-        return SendMessageW(win->hwnd.get(), BM_GETCHECK, 0, 0) == BST_CHECKED;
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return false;
+        return SendMessageW(hwnd, BM_GETCHECK, 0, 0) == BST_CHECKED;
     }
 
     void AddString(IOSHandle* h, const std::string& s) override {
-        auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return;
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
         std::wstring ws = Utf8ToW(s);
-        SendMessageW(win->hwnd.get(), CB_ADDSTRING, 0, (LPARAM)ws.c_str());
+        SendMessageW(hwnd, CB_ADDSTRING, 0, (LPARAM)ws.c_str());
     }
 
     void SetSel(IOSHandle* h, int idx) override {
-        auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return;
-        SendMessageW(win->hwnd.get(), CB_SETCURSEL, idx, 0);
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        SendMessageW(hwnd, CB_SETCURSEL, idx, 0);
     }
 
     int GetSel(IOSHandle* h) const override {
-        auto* win = static_cast<Win*>(h);
-        if (!win || !win->hwnd) return -1;
-        return (int)SendMessageW(win->hwnd.get(), CB_GETCURSEL, 0, 0);
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return -1;
+        return (int)SendMessageW(hwnd, CB_GETCURSEL, 0, 0);
+    }
+
+    std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return nullptr;
+        return std::make_unique<TWindowsCanvas>(hwnd);
     }
 
     static IEventSink* SinkForHwnd(HWND h) {
         Win* w = WinOf(h);
         return w ? w->sink : nullptr;
-    }
-
-    std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h) override {
-        auto* w = static_cast<Win*>(h);
-        if (!w || !w->hwnd) return nullptr;
-        return std::make_unique<TWindowsCanvas>(w->hwnd.get());
     }
 
     int RunMessageLoop() override {
