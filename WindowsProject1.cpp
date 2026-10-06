@@ -350,8 +350,8 @@ namespace vcl {
     };
 
     // ============================================================================
-    //  TControl
-    // ============================================================================
+//  TControl
+// ============================================================================
     class TControl : public TComponent {
         INHERITED(TComponent);
     private:
@@ -373,7 +373,7 @@ namespace vcl {
     protected:
         int  FLeft = 0, FTop = 0;
         int  FWidth = 0, FHeight = 0;
-        bool FVisible = true;
+        bool FVisible = false;
         bool FEnabled = true;
         std::string FCaption;
 
@@ -403,7 +403,9 @@ namespace vcl {
         void SetPosition(int l, int t) { SetBounds(l, t, FWidth, FHeight); }
         void SetSize(int w, int h) { SetBounds(FLeft, FTop, w, h); }
 
-        bool Visible() const { return FVisible; }
+        bool IsVisible() const {
+            return FVisible && (FParent ? FParent->IsVisible() : true);
+        }
 
         virtual void SetVisible(bool v) {
             if (FVisible == v) return;
@@ -462,8 +464,6 @@ namespace vcl {
             case OSEvent::Command:
                 if (FOnClick) FOnClick(this);
                 break;
-            case OSEvent::Show:      FVisible = true;  break;
-            case OSEvent::Hide:      FVisible = false; break;
             }
         }
     };
@@ -499,7 +499,7 @@ namespace vcl {
 
     public:
         explicit TOSControl(TComponent* owner) : TControl(owner) {}
-        
+
         ~TOSControl() override = default;
 
         TCloseEvent& OnClose() { return FOnClose; }
@@ -514,7 +514,7 @@ namespace vcl {
         }
 
         virtual void PaintTree(TCanvas* c) {
-            if (!FVisible) return;
+            if (!IsVisible()) return;
             OnPaint(c);
             for (auto* child : FChildControls) child->PaintTree(c);
         }
@@ -535,7 +535,7 @@ namespace vcl {
             d.kind = Kind();
             d.caption = FCaption;
             d.x = FLeft; d.y = FTop; d.w = FWidth; d.h = FHeight;
-            d.visible = FVisible;
+            d.visible = IsVisible();
             d.enabled = FEnabled;
             d.id = FId;
             d.parent = parentHandle;
@@ -569,11 +569,15 @@ namespace vcl {
             if (!FHandle) return;
             FDriver->SetBounds(FHandle.get(), l, t, w, h);
         }
+
         void SetVisible(bool v) override {
             inherited::SetVisible(v);
-            if (!FHandle) return;
-            FDriver->SetVisible(FHandle.get(), v);
+            if (FHandle && FDriver) 
+                FDriver->SetVisible(FHandle.get(), IsVisible());
+            for (auto* c : FChildControls)
+                c->SetVisible(v);
         }
+
         void SetCaption(const std::string& c) override {
             inherited::SetCaption(c);
             if (!FHandle) return;
@@ -599,11 +603,11 @@ namespace vcl {
             case OSEvent::Change:
                 if (FOnChange) FOnChange(this);
                 break;
-            case OSEvent::Show:      FVisible = true;  break;
-            case OSEvent::Hide:      FVisible = false; break;
             case OSEvent::Close:
                 if (FOnClose) FOnClose(this, e.cancel);
                 return;
+            case OSEvent::Show:      FVisible = true;  break;
+            case OSEvent::Hide:      FVisible = false; break;
             default:
                 inherited::OnOSEvent(e);
                 return;
