@@ -377,7 +377,7 @@ namespace vcl {
         bool FEnabled = true;
         std::string FCaption;
 
-        TControl* FParent = nullptr;              // визуальный, НЕ владеет
+        TControl* FParent = nullptr;
         TEventDispatcher FDispatcher;
 
     public:
@@ -475,7 +475,7 @@ namespace vcl {
         INHERITED(TControl);
     protected:
         std::unique_ptr<IOSHandle> FHandle;
-        std::vector<TOSControl*> FChildControls;    // дети-контролы, НЕ владеет
+        std::vector<TOSControl*> FChildControls;
         IOSDriver* FDriver = nullptr;
         int        FId = 0;
     private:
@@ -820,8 +820,8 @@ namespace vcl {
     // ============================================================================
     class TApplication : public TComponent {
         INHERITED(TComponent);
-        IOSDriver* FDriver = nullptr;     // НЕ владеет
-        TForm* FMainForm = nullptr;       // ссылка; владение — через FOwnedComponents
+        IOSDriver* FDriver = nullptr;
+        TForm* FMainForm = nullptr;
         std::string FTitle;
     public:
 
