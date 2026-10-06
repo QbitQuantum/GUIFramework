@@ -304,25 +304,57 @@ namespace vcl {
     public:
         virtual ~IOSDriver() = default;
 
-        virtual std::unique_ptr<IOSHandle> 
+        virtual std::unique_ptr<IOSHandle>
             CreateControl(const ControlDesc& d) = 0;
-        virtual std::unique_ptr<TCanvas>  
+        virtual std::unique_ptr<TCanvas>
             CreateCanvas(IOSHandle* h) = 0;
 
         virtual const char* Name() const = 0;
         virtual int  RunMessageLoop() = 0;
+
         virtual void SetBounds(IOSHandle* h, int l, int t, int w, int ht) = 0;
+        virtual void GetBounds(IOSHandle* h, int& l, int& t, int& w, int& ht) const = 0;
+
         virtual void SetVisible(IOSHandle* h, bool v) = 0;
+        virtual bool GetVisible(IOSHandle* h) const = 0;
+
+        virtual void SetEnabled(IOSHandle* h, bool e) = 0;
+        virtual bool GetEnabled(IOSHandle* h) const = 0;
+
         virtual void SetText(IOSHandle* h, const std::string& text) = 0;
         virtual std::string GetText(IOSHandle* h) const = 0;
-        virtual void SetEnabled(IOSHandle* h, bool e) = 0;
+
+        virtual void SetCaption(IOSHandle* h, const std::string& text) = 0;
+        virtual std::string GetCaption(IOSHandle* h) const = 0;
+
         virtual void Invalidate(IOSHandle* h) = 0;
+        virtual void Update(IOSHandle* h) = 0;
+
+        virtual void BringToFront(IOSHandle* h) = 0;
+        virtual void SendToBack(IOSHandle* h) = 0;
+
+        virtual void SetFocus(IOSHandle* h) = 0;
+        virtual bool HasFocus(IOSHandle* h) const = 0;
 
         virtual void SetCheck(IOSHandle* h, bool c) = 0;
         virtual bool GetCheck(IOSHandle* h) const = 0;
+
         virtual void AddString(IOSHandle* h, const std::string& s) = 0;
+        virtual void ClearStrings(IOSHandle* h) = 0;
+        virtual int  GetCount(IOSHandle* h) const = 0;
+        virtual std::string GetString(IOSHandle* h, int idx) const = 0;
+
         virtual void SetSel(IOSHandle* h, int idx) = 0;
         virtual int  GetSel(IOSHandle* h) const = 0;
+
+        virtual void SetParent(IOSHandle* h, IOSHandle* parent) = 0;
+        virtual IOSHandle* GetParent(IOSHandle* h) const = 0;
+
+        virtual void SetId(IOSHandle* h, int id) = 0;
+        virtual int  GetId(IOSHandle* h) const = 0;
+        virtual void SetFont(IOSHandle* h, const std::string& face,
+            int size, bool bold, bool italic) = 0;
+        virtual void Close(IOSHandle* h) = 0;
     };
 
     // ============================================================================
@@ -331,7 +363,7 @@ namespace vcl {
     class TEventDispatcher final : public IEventSink {
         using TNotify = std::function<void(OSEvent&)>;
     public:
-        
+
         TEventDispatcher() = default;
         ~TEventDispatcher() override = default;
 
@@ -572,7 +604,7 @@ namespace vcl {
 
         void SetVisible(bool v) override {
             inherited::SetVisible(v);
-            if (FHandle && FDriver) 
+            if (FHandle && FDriver)
                 FDriver->SetVisible(FHandle.get(), IsVisible());
             for (auto* c : FChildControls)
                 c->SetVisible(v);
@@ -1149,7 +1181,7 @@ public:
     }
 
     ~TWindowsDriver() override {
-        Shutdown(); 
+        Shutdown();
     }
 
     TWindowsDriver(const TWindowsDriver&) = delete;
@@ -1236,10 +1268,38 @@ public:
             SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
+    void GetBounds(IOSHandle* h, int& l, int& t, int& w, int& ht) const override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        RECT r;
+        ::GetWindowRect(hwnd, &r);
+        l = r.left; t = r.top;
+        w = r.right - r.left;
+        ht = r.bottom - r.top;
+    }
+
     void SetVisible(IOSHandle* h, bool v) override {
         HWND hwnd = HwndOf(h);
         if (!hwnd) return;
         ::ShowWindow(hwnd, v ? SW_SHOW : SW_HIDE);
+    }
+
+    bool GetVisible(IOSHandle* h) const override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return false;
+        return ::IsWindowVisible(hwnd) != FALSE;
+    }
+
+    void SetEnabled(IOSHandle* h, bool e) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::EnableWindow(hwnd, e ? TRUE : FALSE);
+    }
+
+    bool GetEnabled(IOSHandle* h) const override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return false;
+        return ::IsWindowEnabled(hwnd) != FALSE;
     }
 
     void SetText(IOSHandle* h, const std::string& text) override {
@@ -1259,16 +1319,50 @@ public:
         return WToUtf8(s);
     }
 
-    void SetEnabled(IOSHandle* h, bool e) override {
-        HWND hwnd = HwndOf(h);
-        if (!hwnd) return;
-        ::EnableWindow(hwnd, e ? TRUE : FALSE);
+    void SetCaption(IOSHandle* h, const std::string& text) override {
+        SetText(h, text);
+    }
+
+    std::string GetCaption(IOSHandle* h) const override {
+        return GetText(h);
     }
 
     void Invalidate(IOSHandle* h) override {
         HWND hwnd = HwndOf(h);
         if (!hwnd) return;
         ::InvalidateRect(hwnd, nullptr, TRUE);
+    }
+
+    void Update(IOSHandle* h) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::UpdateWindow(hwnd);
+    }
+
+    void BringToFront(IOSHandle* h) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
+    void SendToBack(IOSHandle* h) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
+    void SetFocus(IOSHandle* h) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::SetFocus(hwnd);
+    }
+
+    bool HasFocus(IOSHandle* h) const override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return false;
+        return ::GetFocus() == hwnd;
     }
 
     void SetCheck(IOSHandle* h, bool c) override {
@@ -1290,6 +1384,29 @@ public:
         SendMessageW(hwnd, CB_ADDSTRING, 0, (LPARAM)ws.c_str());
     }
 
+    void ClearStrings(IOSHandle* h) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        SendMessageW(hwnd, CB_RESETCONTENT, 0, 0);
+    }
+
+    int GetCount(IOSHandle* h) const override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return 0;
+        return (int)SendMessageW(hwnd, CB_GETCOUNT, 0, 0);
+    }
+
+    std::string GetString(IOSHandle* h, int idx) const override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return {};
+        int len = (int)SendMessageW(hwnd, CB_GETLBTEXTLEN, idx, 0);
+        if (len < 0) return {};
+        std::wstring s(len + 1, L'\0');
+        SendMessageW(hwnd, CB_GETLBTEXT, idx, (LPARAM)&s[0]);
+        s.resize(len);
+        return WToUtf8(s);
+    }
+
     void SetSel(IOSHandle* h, int idx) override {
         HWND hwnd = HwndOf(h);
         if (!hwnd) return;
@@ -1300,6 +1417,55 @@ public:
         HWND hwnd = HwndOf(h);
         if (!hwnd) return -1;
         return (int)SendMessageW(hwnd, CB_GETCURSEL, 0, 0);
+    }
+
+    void SetParent(IOSHandle* h, IOSHandle* parent) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        HWND ph = parent ? HwndOf(parent) : nullptr;
+        ::SetParent(hwnd, ph);
+    }
+
+    IOSHandle* GetParent(IOSHandle* h) const override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return nullptr;
+        HWND ph = ::GetParent(hwnd);
+        if (!ph) return nullptr;
+        return reinterpret_cast<IOSHandle*>(WinOf(ph));
+    }
+
+    void SetId(IOSHandle* h, int id) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::SetWindowLongPtrW(hwnd, GWLP_ID, id);
+    }
+
+    int GetId(IOSHandle* h) const override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return 0;
+        return (int)::GetWindowLongPtrW(hwnd, GWLP_ID);
+    }
+
+    void SetFont(IOSHandle* h, const std::string& face,
+        int size, bool bold, bool italic) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+
+        LOGFONTW lf{};
+        lf.lfHeight = -MulDiv(size, GetDeviceCaps(GetDC(hwnd), LOGPIXELSY), 72);
+        lf.lfWeight = bold ? FW_BOLD : FW_NORMAL;
+        lf.lfItalic = italic ? TRUE : FALSE;
+        std::wstring wface = Utf8ToW(face);
+        wcsncpy_s(lf.lfFaceName, wface.c_str(), _TRUNCATE);
+
+        HFONT hFont = CreateFontIndirectW(&lf);
+        SendMessageW(hwnd, WM_SETFONT, (WPARAM)hFont, TRUE);
+    }
+
+    void Close(IOSHandle* h) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+        ::PostMessageW(hwnd, WM_CLOSE, 0, 0);
     }
 
     std::unique_ptr<TCanvas> CreateCanvas(IOSHandle* h) override {
@@ -1337,7 +1503,7 @@ public:
             sink->OnOSEvent(e);
             break;
         case EN_CHANGE:
-            if (SendMessage(child, EM_GETMODIFY, 0, 0)) 
+            if (SendMessage(child, EM_GETMODIFY, 0, 0))
             {
                 e.type = OSEvent::Change;
                 sink->OnOSEvent(e);
@@ -1348,7 +1514,7 @@ public:
             sink->OnOSEvent(e);
             break;
         case CBN_EDITCHANGE:
-            if (GetFocus() == child) 
+            if (GetFocus() == child)
             {
                 e.type = OSEvent::Change;
                 sink->OnOSEvent(e);
