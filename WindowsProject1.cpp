@@ -978,7 +978,6 @@ public:
         ITWindowsDriver* driver = nullptr;
         IEventSink* sink = nullptr;
         ControlKind      kind = ControlKind::Panel;
-        int              id = 0;
 
         ~Win() override = default;
     };
@@ -1027,7 +1026,6 @@ public:
         auto win = std::make_unique<Win>();
         win->driver = this;
         win->kind = d.kind;
-        win->id = d.id;
         win->sink = d.sink;
 
         win->hwnd.reset(::CreateWindowExW(
