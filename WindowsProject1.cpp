@@ -750,7 +750,7 @@ namespace vcl {
         ControlKind Kind() const override { return ControlKind::Edit; }
 
         std::string Text() const {
-            return FHandle ? FDriver->GetText(FHandle.get()) : std::string{};
+            return FHandle ? FDriver->GetText(FHandle.get()) : FText;
         }
 
         void SetText(const std::string& s) {
