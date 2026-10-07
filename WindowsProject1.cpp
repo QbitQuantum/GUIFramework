@@ -282,18 +282,14 @@ namespace vcl {
         const TStyle* GetActiveStyle() const { return GetStyle(FActiveName); }
         const std::string& GetActiveStyleName() const { return FActiveName; }
 
-        std::size_t Subscribe(TStyleChangeEvent e) {
-            std::size_t id = FNextSubId++;
-            FSubs[id] = std::move(e);
-            return id;
+        void Subscribe(TStyleChangeEvent e) {
+            FSubs.push_back(std::move(e));
         }
-        void Unsubscribe(std::size_t id) { FSubs.erase(id); }
 
         void NotifyChange() {
             const TStyle* active = GetActiveStyle();
             if (!active) return;
-            for (auto& kv : FSubs) {
-                const auto& fn = kv.second;
+            for (auto& fn : FSubs) {
                 if (fn) fn(*active);
             }
         }
@@ -306,9 +302,8 @@ namespace vcl {
         }
 
     private:
-        std::map<std::string, TStyle>            FStyles;
-        std::map<std::size_t, TStyleChangeEvent> FSubs;
-        std::size_t FNextSubId = 1;
+        std::map<std::string, TStyle> FStyles;
+        std::vector<TStyleChangeEvent> FSubs;
         std::string FActiveName;
     };
 
@@ -1178,17 +1173,12 @@ namespace vcl {
         TStyleManager* FStyleManager = nullptr;
         TForm* FMainForm = nullptr;
         std::string FTitle;
-        std::size_t FStyleSubId = 0;
     public:
         bool MainFormOnTaskBar = false;
 
         TApplication(TComponent* owner) : TComponent(owner) {}
 
-        ~TApplication() override {
-            if (FStyleSubId && FStyleManager) {
-                FStyleManager->Unsubscribe(FStyleSubId);
-            }
-        }
+        ~TApplication() override = default;
 
         // --- Стили (невладеющий указатель) ---
         void SetStyleManager(TStyleManager* m) { FStyleManager = m; }
@@ -1206,17 +1196,6 @@ namespace vcl {
             FStyleManager->RegisterStyle(s.GetName(), std::move(s));
         }
 
-        virtual void Initialize() {
-            if (FStyleManager) FStyleManager->InstallBuiltins();
-
-            if (FStyleManager && !FStyleSubId) {
-                FStyleSubId = FStyleManager->Subscribe(
-                    [this](const TStyle&) {
-                        if (FMainForm) FMainForm->ApplyStyleRecursive();
-                    });
-            }
-        }
-
         // --- Драйвер ---
         void SetDriver(IOSDriver* d) { FDriver = d; }
         IOSDriver* GetDriver() const { return FDriver; }
@@ -1224,13 +1203,24 @@ namespace vcl {
         const std::string& GetTitle() const { return FTitle; }
         void SetTitle(const std::string& t) { FTitle = t; }
 
-        void CreateForm(TForm* f) { FMainForm = f; }
+        void CreateForm(TForm* f) {
+            FMainForm = f;
+            if (FStyleManager && FMainForm) {
+                FStyleManager->Subscribe([this](const TStyle&) {
+                    FMainForm->ApplyStyleRecursive();
+                    });
+            }
+        }
         TForm* GetMainForm() const { return FMainForm; }
 
         void ShowException(Exception* e) {
             if (!e) return;
             std::string msg = e->ToString();
             std::cerr << "[Application Error] " << msg << "\n";
+        }
+
+        virtual void Initialize() {
+            if (FStyleManager) FStyleManager->InstallBuiltins();
         }
 
         int Run() {
