@@ -41,6 +41,285 @@
 // ============================================================================
 namespace vcl {
 
+    // ---------------------------------------------------------------------------
+    //  TStyleColor — RGB + флаг "задано"
+    // ---------------------------------------------------------------------------
+    struct TStyleColor {
+        uint8_t r = 0, g = 0, b = 0;
+        bool    valid = false;
+
+        static TStyleColor FromRGB(uint8_t R, uint8_t G, uint8_t B) {
+            return { R, G, B, true };
+        }
+        static TStyleColor None() { return { 0, 0, 0, false }; }
+    };
+
+    // ---------------------------------------------------------------------------
+    //  TStyleFont
+    // ---------------------------------------------------------------------------
+    struct TStyleFont {
+        std::string face = "Segoe UI";
+        int         size = 9;
+        bool        bold = false;
+        bool        italic = false;
+        bool        valid = false;
+    };
+
+    // ---------------------------------------------------------------------------
+    //  TStyleMetrics
+    // ---------------------------------------------------------------------------
+    struct TStyleMetrics {
+        int  borderWidth = 1;
+        int  cornerRadius = 0;
+        int  padding = 4;
+        int  controlHeight = 26;
+        bool valid = false;
+    };
+
+    // ---------------------------------------------------------------------------
+    //  Роли стиля
+    // ---------------------------------------------------------------------------
+    namespace StyleRole {
+        inline constexpr const char* FormBackground = "Form.Background";
+        inline constexpr const char* PanelBackground = "Panel.Background";
+        inline constexpr const char* LabelText = "Label.Text";
+        inline constexpr const char* EditBackground = "Edit.Background";
+        inline constexpr const char* EditText = "Edit.Text";
+        inline constexpr const char* EditBorder = "Edit.Border";
+        inline constexpr const char* ButtonFace = "Button.Face";
+        inline constexpr const char* ButtonText = "Button.Text";
+        inline constexpr const char* ButtonHot = "Button.Hot";
+        inline constexpr const char* ButtonPressed = "Button.Pressed";
+        inline constexpr const char* ComboBackground = "Combo.Background";
+        inline constexpr const char* ComboText = "Combo.Text";
+        inline constexpr const char* Accent = "Accent";
+        inline constexpr const char* Divider = "Divider";
+
+        inline constexpr const char* FontDefault = "Font.Default";
+        inline constexpr const char* FontLabel = "Font.Label";
+        inline constexpr const char* FontButton = "Font.Button";
+        inline constexpr const char* FontTitle = "Font.Title";
+
+        inline constexpr const char* MetricsControl = "Metrics.Control";
+    }
+
+    // ---------------------------------------------------------------------------
+    //  TStyle
+    // ---------------------------------------------------------------------------
+    class TStyle {
+    public:
+        TStyle() = default;
+        explicit TStyle(const std::string& name) : FName(name) {}
+
+        const std::string& GetName() const { return FName; }
+        void SetName(const std::string& n) { FName = n; }
+
+        void SetColor(const std::string& role, TStyleColor c) {
+            FColors[role] = c;
+        }
+        TStyleColor GetColor(const std::string& role,
+            TStyleColor fallback = TStyleColor::None()) const {
+            auto it = FColors.find(role);
+            return it == FColors.end() ? fallback : it->second;
+        }
+        bool HasColor(const std::string& role) const {
+            return FColors.find(role) != FColors.end();
+        }
+
+        void SetFont(const std::string& role, const TStyleFont& f) {
+            FFonts[role] = f;
+        }
+        TStyleFont GetFont(const std::string& role, TStyleFont fallback = {}) const {
+            auto it = FFonts.find(role);
+            return it == FFonts.end() ? fallback : it->second;
+        }
+
+        void SetMetrics(const std::string& role, const TStyleMetrics& m) {
+            FMetrics[role] = m;
+        }
+        TStyleMetrics GetMetrics(const std::string& role,
+            TStyleMetrics fallback = {}) const {
+            auto it = FMetrics.find(role);
+            return it == FMetrics.end() ? fallback : it->second;
+        }
+
+        void MergeFrom(const TStyle& base) {
+            for (auto& kv : base.FColors)
+                if (!HasColor(kv.first)) FColors[kv.first] = kv.second;
+            for (auto& kv : base.FFonts)
+                if (FFonts.find(kv.first) == FFonts.end())
+                    FFonts[kv.first] = kv.second;
+            for (auto& kv : base.FMetrics)
+                if (FMetrics.find(kv.first) == FMetrics.end())
+                    FMetrics[kv.first] = kv.second;
+        }
+
+    private:
+        std::string FName;
+        std::map<std::string, TStyleColor>   FColors;
+        std::map<std::string, TStyleFont>    FFonts;
+        std::map<std::string, TStyleMetrics> FMetrics;
+    };
+
+    // ---------------------------------------------------------------------------
+    //  Встроенные темы
+    // ---------------------------------------------------------------------------
+    inline std::shared_ptr<TStyle> MakeLightStyle() {
+        auto s = std::make_shared<TStyle>("Light");
+        s->SetColor(StyleRole::FormBackground, TStyleColor::FromRGB(250, 250, 250));
+        s->SetColor(StyleRole::PanelBackground, TStyleColor::FromRGB(240, 244, 248));
+        s->SetColor(StyleRole::LabelText, TStyleColor::FromRGB(28, 28, 30));
+        s->SetColor(StyleRole::EditBackground, TStyleColor::FromRGB(255, 255, 255));
+        s->SetColor(StyleRole::EditText, TStyleColor::FromRGB(20, 20, 20));
+        s->SetColor(StyleRole::EditBorder, TStyleColor::FromRGB(200, 205, 210));
+        s->SetColor(StyleRole::ButtonFace, TStyleColor::FromRGB(238, 242, 247));
+        s->SetColor(StyleRole::ButtonText, TStyleColor::FromRGB(20, 20, 20));
+        s->SetColor(StyleRole::ButtonHot, TStyleColor::FromRGB(225, 235, 248));
+        s->SetColor(StyleRole::ButtonPressed, TStyleColor::FromRGB(210, 225, 245));
+        s->SetColor(StyleRole::ComboBackground, TStyleColor::FromRGB(255, 255, 255));
+        s->SetColor(StyleRole::ComboText, TStyleColor::FromRGB(20, 20, 20));
+        s->SetColor(StyleRole::Accent, TStyleColor::FromRGB(0, 120, 215));
+        s->SetColor(StyleRole::Divider, TStyleColor::FromRGB(210, 215, 220));
+
+        s->SetFont(StyleRole::FontDefault, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s->SetFont(StyleRole::FontLabel, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s->SetFont(StyleRole::FontButton, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s->SetFont(StyleRole::FontTitle, TStyleFont{ "Segoe UI", 12, true,  false, true });
+
+        s->SetMetrics(StyleRole::MetricsControl, TStyleMetrics{ 1, 0, 4, 26, true });
+        return s;
+    }
+
+    inline std::shared_ptr<TStyle> MakeDarkStyle() {
+        auto s = std::make_shared<TStyle>("Dark");
+        s->SetColor(StyleRole::FormBackground, TStyleColor::FromRGB(32, 34, 38));
+        s->SetColor(StyleRole::PanelBackground, TStyleColor::FromRGB(42, 46, 52));
+        s->SetColor(StyleRole::LabelText, TStyleColor::FromRGB(230, 232, 236));
+        s->SetColor(StyleRole::EditBackground, TStyleColor::FromRGB(52, 56, 62));
+        s->SetColor(StyleRole::EditText, TStyleColor::FromRGB(235, 238, 242));
+        s->SetColor(StyleRole::EditBorder, TStyleColor::FromRGB(90, 96, 104));
+        s->SetColor(StyleRole::ButtonFace, TStyleColor::FromRGB(60, 66, 74));
+        s->SetColor(StyleRole::ButtonText, TStyleColor::FromRGB(235, 238, 242));
+        s->SetColor(StyleRole::ButtonHot, TStyleColor::FromRGB(74, 84, 96));
+        s->SetColor(StyleRole::ButtonPressed, TStyleColor::FromRGB(46, 54, 64));
+        s->SetColor(StyleRole::ComboBackground, TStyleColor::FromRGB(52, 56, 62));
+        s->SetColor(StyleRole::ComboText, TStyleColor::FromRGB(235, 238, 242));
+        s->SetColor(StyleRole::Accent, TStyleColor::FromRGB(90, 170, 255));
+        s->SetColor(StyleRole::Divider, TStyleColor::FromRGB(80, 86, 94));
+
+        s->SetFont(StyleRole::FontDefault, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s->SetFont(StyleRole::FontLabel, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s->SetFont(StyleRole::FontButton, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s->SetFont(StyleRole::FontTitle, TStyleFont{ "Segoe UI", 12, true,  false, true });
+
+        s->SetMetrics(StyleRole::MetricsControl, TStyleMetrics{ 1, 0, 4, 26, true });
+        return s;
+    }
+
+    inline std::shared_ptr<TStyle> MakeClassicStyle() {
+        auto s = std::make_shared<TStyle>("Classic");
+        s->SetColor(StyleRole::FormBackground, TStyleColor::FromRGB(212, 208, 200));
+        s->SetColor(StyleRole::PanelBackground, TStyleColor::FromRGB(212, 208, 200));
+        s->SetColor(StyleRole::LabelText, TStyleColor::FromRGB(0, 0, 0));
+        s->SetColor(StyleRole::EditBackground, TStyleColor::FromRGB(255, 255, 255));
+        s->SetColor(StyleRole::EditText, TStyleColor::FromRGB(0, 0, 0));
+        s->SetColor(StyleRole::EditBorder, TStyleColor::FromRGB(128, 128, 128));
+        s->SetColor(StyleRole::ButtonFace, TStyleColor::FromRGB(212, 208, 200));
+        s->SetColor(StyleRole::ButtonText, TStyleColor::FromRGB(0, 0, 0));
+        s->SetColor(StyleRole::ButtonHot, TStyleColor::FromRGB(228, 224, 216));
+        s->SetColor(StyleRole::ButtonPressed, TStyleColor::FromRGB(192, 188, 180));
+        s->SetColor(StyleRole::ComboBackground, TStyleColor::FromRGB(255, 255, 255));
+        s->SetColor(StyleRole::ComboText, TStyleColor::FromRGB(0, 0, 0));
+        s->SetColor(StyleRole::Accent, TStyleColor::FromRGB(10, 36, 106));
+        s->SetColor(StyleRole::Divider, TStyleColor::FromRGB(128, 128, 128));
+
+        s->SetFont(StyleRole::FontDefault, TStyleFont{ "MS Sans Serif",  8, false, false, true });
+        s->SetFont(StyleRole::FontLabel, TStyleFont{ "MS Sans Serif",  8, false, false, true });
+        s->SetFont(StyleRole::FontButton, TStyleFont{ "MS Sans Serif",  8, false, false, true });
+        s->SetFont(StyleRole::FontTitle, TStyleFont{ "MS Sans Serif", 10, true,  false, true });
+
+        s->SetMetrics(StyleRole::MetricsControl, TStyleMetrics{ 1, 0, 2, 24, true });
+        return s;
+    }
+
+    // ---------------------------------------------------------------------------
+    //  TStyleManager
+    // ---------------------------------------------------------------------------
+    class TStyleManager {
+    public:
+        using TStyleChangeEvent = std::function<void(const TStyle&)>;
+
+        TStyleManager() = default;
+        ~TStyleManager() = default;
+
+        TStyleManager(const TStyleManager&) = delete;
+        TStyleManager& operator=(const TStyleManager&) = delete;
+
+        void RegisterStyle(const std::string& name, std::shared_ptr<TStyle> s) {
+            if (!s) return;
+            s->SetName(name);
+            FStyles[name] = std::move(s);
+        }
+
+        std::shared_ptr<TStyle> GetStyle(const std::string& name) const {
+            auto it = FStyles.find(name);
+            return it == FStyles.end() ? nullptr : it->second;
+        }
+
+        std::vector<std::string> GetStyleNames() const {
+            std::vector<std::string> names;
+            names.reserve(FStyles.size());
+            for (auto& kv : FStyles) names.push_back(kv.first);
+            return names;
+        }
+
+        void SetActiveStyle(const std::string& name) {
+            auto s = GetStyle(name);
+            if (!s) return;
+            FActiveName = name;
+            FActive = s;
+            NotifyChange();
+        }
+
+        std::shared_ptr<TStyle> GetActiveStyle() const { return FActive; }
+        const std::string& GetActiveStyleName() const { return FActiveName; }
+
+        std::size_t Subscribe(TStyleChangeEvent e) {
+            std::size_t id = FNextSubId++;
+            FSubs[id] = std::move(e);
+            return id;
+        }
+        void Unsubscribe(std::size_t id) { FSubs.erase(id); }
+
+        void NotifyChange() {
+            if (!FActive) return;
+
+            std::shared_ptr<TStyle> active = FActive;
+
+            std::vector<TStyleChangeEvent> snapshot;
+            snapshot.reserve(FSubs.size());
+            for (auto& kv : FSubs)
+                snapshot.push_back(kv.second);
+
+            for (auto& fn : snapshot)
+                if (fn) fn(*active);
+        }
+
+        void InstallBuiltins() {
+            RegisterStyle("Light", MakeLightStyle());
+            RegisterStyle("Dark", MakeDarkStyle());
+            RegisterStyle("Classic", MakeClassicStyle());
+            if (!FActive) SetActiveStyle("Light");
+        }
+
+    private:
+        std::map<std::string, std::shared_ptr<TStyle>> FStyles;
+        std::map<std::size_t, TStyleChangeEvent>       FSubs;
+        std::size_t        FNextSubId = 1;
+        std::string        FActiveName;
+        std::shared_ptr<TStyle> FActive;
+    };
+
     // ============================================================================
     //  TObject
     // ============================================================================
@@ -355,6 +634,7 @@ namespace vcl {
         virtual void SetFont(IOSHandle* h, const std::string& face,
             int size, bool bold, bool italic) = 0;
         virtual void Close(IOSHandle* h) = 0;
+        virtual void ApplyStyle(IOSHandle* h, const TStyle& style, ControlKind kind) = 0;
     };
 
     // ============================================================================
@@ -382,8 +662,8 @@ namespace vcl {
     };
 
     // ============================================================================
-//  TControl
-// ============================================================================
+    //  TControl
+    // ============================================================================
     class TControl : public TComponent {
         INHERITED(TComponent);
     private:
@@ -412,6 +692,8 @@ namespace vcl {
         TControl* FParent = nullptr;
         TEventDispatcher FDispatcher;
 
+        std::string FStyleName;
+        TStyleManager* FStyleManager = nullptr;
     public:
         explicit TControl(TComponent* owner) : TComponent(owner) {
             FDispatcher.SetNotify([this](OSEvent& e) { OnOSEvent(e); });
@@ -466,12 +748,32 @@ namespace vcl {
         virtual void OnPaint(TCanvas* Canvas) {}
         virtual void Invalidate() {}
 
+        const std::string& GetStyleName() const { return FStyleName; }
+        virtual void SetStyleName(const std::string& n) {
+            FStyleName = n;
+            ApplyStyleRecursive();
+        }
+
+        virtual void SetStyleManager(TStyleManager* m) {
+            FStyleManager = m;
+        }
+        TStyleManager* GetStyleManager() const { return FStyleManager; }
+
+        std::shared_ptr<TStyle> ResolveStyle() const {
+            if (!FStyleName.empty() && FStyleManager) {
+                auto s = FStyleManager->GetStyle(FStyleName);
+                if (s) return s;
+            }
+            if (FParent) return FParent->ResolveStyle();
+            if (FStyleManager) return FStyleManager->GetActiveStyle();
+            return nullptr;
+        }
+        virtual void ApplyStyleRecursive() {}
         const char* ClassName() const override { return "TControl"; }
         bool InheritsFrom(const char* cls) const override {
             return std::string(cls) == "TControl" || inherited::InheritsFrom(cls);
         }
 
-        // Виртуальный вход для событий. Диспатчер зовёт его.
         virtual void OnOSEvent(OSEvent& e) {
             switch (e.type) {
             case OSEvent::MouseDown:
@@ -528,11 +830,36 @@ namespace vcl {
         TNotifyEvent FOnChange;
         TCloseEvent  FOnClose;
         TKeyEvent    FOnKeyDown;
-
+        std::size_t FStyleSubId = 0;
     public:
         explicit TOSControl(TComponent* owner) : TControl(owner) {}
 
-        ~TOSControl() override = default;
+        ~TOSControl() override {
+            if (FStyleSubId && FStyleManager) {
+                FStyleManager->Unsubscribe(FStyleSubId);
+                FStyleSubId = 0;
+            }
+            FStyleManager = nullptr;
+        }
+
+        void SetStyleManager(TStyleManager* m) override {
+            if (FStyleManager == m) return;
+
+            if (FStyleSubId && FStyleManager) {
+                FStyleManager->Unsubscribe(FStyleSubId);
+                FStyleSubId = 0;
+            }
+
+            FStyleManager = m;
+
+            if (FStyleManager) {
+                FStyleSubId = FStyleManager->Subscribe(
+                    [this](const TStyle&) { ApplyStyleRecursive(); });
+            }
+
+            for (auto* c : FChildControls)
+                c->SetStyleManager(m);
+        }
 
         TCloseEvent& OnClose() { return FOnClose; }
         TNotifyEvent& OnChange() { return FOnChange; }
@@ -542,7 +869,11 @@ namespace vcl {
             if (FParent == p) return;
             if (FParent) RemoveChildControl(this);
             FParent = p;
-            if (p) p->AddChildControl(this);
+            if (p) {
+                p->AddChildControl(this);
+                if (p->GetStyleManager())
+                    SetStyleManager(p->GetStyleManager());
+            }
         }
 
         virtual void PaintTree(TCanvas* c) {
@@ -579,6 +910,7 @@ namespace vcl {
             FDriver->SetText(FHandle.get(), FCaption);
             FDriver->SetVisible(FHandle.get(), FVisible);
             FDriver->SetEnabled(FHandle.get(), FEnabled);
+            ApplyStyleToHandle();
         }
 
         void CreateHandlesRecursive(IOSHandle* parentHandle) {
@@ -623,6 +955,19 @@ namespace vcl {
         void Invalidate() override {
             if (FHandle) FDriver->Invalidate(FHandle.get());
             inherited::Invalidate();
+        }
+
+        void ApplyStyleRecursive() override {
+            ApplyStyleToHandle();
+            for (auto* c : FChildControls)
+                c->ApplyStyleRecursive();
+        }
+
+        void ApplyStyleToHandle() {
+            if (!FHandle || !FDriver) return;
+            auto style = ResolveStyle();
+            if (!style) return;
+            FDriver->ApplyStyle(FHandle.get(), *style, GetKind());
         }
 
         void OnOSEvent(OSEvent& e) override {
@@ -858,18 +1203,37 @@ namespace vcl {
     class TApplication : public TComponent {
         INHERITED(TComponent);
         IOSDriver* FDriver = nullptr;
+        TStyleManager* FStyleManager = nullptr;
         TForm* FMainForm = nullptr;
         std::string FTitle;
     public:
-
-        // Заглушки в стиле VCL
         bool MainFormOnTaskBar = false;
-        void Initialize() {}
 
         TApplication(TComponent* owner) : TComponent(owner) {}
 
         ~TApplication() override = default;
 
+        // --- Стили (невладеющий указатель) ---
+        void SetStyleManager(TStyleManager* m) { FStyleManager = m; }
+        TStyleManager* GetStyleManager() const { return FStyleManager; }
+
+        void SetStyle(const std::string& name) {
+            if (FStyleManager) FStyleManager->SetActiveStyle(name);
+        }
+        std::string GetStyle() const {
+            return FStyleManager ? FStyleManager->GetActiveStyleName()
+                : std::string{};
+        }
+        void RegisterStyle(std::shared_ptr<TStyle> s) {
+            if (!s || !FStyleManager) return;
+            FStyleManager->RegisterStyle(s->GetName(), std::move(s));
+        }
+
+        virtual void Initialize() {
+            if (FStyleManager) FStyleManager->InstallBuiltins();
+        }
+
+        // --- Драйвер ---
         void SetDriver(IOSDriver* d) { FDriver = d; }
         IOSDriver* GetDriver() const { return FDriver; }
 
@@ -879,7 +1243,6 @@ namespace vcl {
         void CreateForm(TForm* f) { FMainForm = f; }
         TForm* GetMainForm() const { return FMainForm; }
 
-        // Показ исключения — в стиле VCL ShowException.
         void ShowException(Exception* e) {
             if (!e) return;
             std::string msg = e->ToString();
@@ -891,6 +1254,10 @@ namespace vcl {
                 std::cerr << "[TApplication] No driver set!\n";
                 return 1;
             }
+            if (!FStyleManager) {
+                std::cerr << "[TApplication] No style manager set!\n";
+                return 1;
+            }
             if (!FMainForm) {
                 std::cerr << "[TApplication] No main form!\n";
                 return 1;
@@ -898,6 +1265,7 @@ namespace vcl {
 
             FMainForm->SetDriver(FDriver);
             FMainForm->DistributeDriverRecursive();
+            FMainForm->SetStyleManager(FStyleManager);
 
             FMainForm->CreateHandle();
             FMainForm->CreateCanvas();
@@ -949,6 +1317,10 @@ using namespace vcl;
 inline void ShowMessage(const wchar_t* msg)
 {
     MessageBoxW(nullptr, msg, L"Ошибка", MB_ICONERROR);
+}
+
+inline COLORREF ToCOLORREF(const vcl::TStyleColor& c) {
+    return RGB(c.r, c.g, c.b);
 }
 
 class TWindowsCanvas : public TCanvas {
@@ -1015,6 +1387,35 @@ public:
         ITWindowsDriver* driver = nullptr;
         IEventSink* sink = nullptr;
         ControlKind      kind = ControlKind::Panel;
+
+        COLORREF styleText = CLR_INVALID;
+        COLORREF styleBackground = CLR_INVALID;
+        COLORREF styleHot = CLR_INVALID;
+        COLORREF stylePressed = CLR_INVALID;
+
+        wil::unique_hbrush styleBrush;
+        wil::unique_hbrush styleHotBrush;
+        wil::unique_hbrush stylePressedBrush;
+
+        bool isHot = false;
+        bool isPressed = false;
+
+        void RefreshStyleBrushes() {
+            if (styleBackground != CLR_INVALID)
+                styleBrush.reset(CreateSolidBrush(styleBackground));
+            else
+                styleBrush.reset();
+
+            if (styleHot != CLR_INVALID)
+                styleHotBrush.reset(CreateSolidBrush(styleHot));
+            else
+                styleHotBrush.reset();
+
+            if (stylePressed != CLR_INVALID)
+                stylePressedBrush.reset(CreateSolidBrush(stylePressed));
+            else
+                stylePressedBrush.reset();
+        }
 
         ~Win() override = default;
     };
@@ -1102,10 +1503,6 @@ public:
                 msg == WM_RBUTTONUP ? 2 : 3);
             return 0;
 
-        case WM_MOUSEMOVE:
-            drv->OnMouseMove(hwnd, w, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
-            return 0;
-
         case WM_KEYDOWN:
             drv->OnKeyDown(hwnd, w, (int)wp);
             return 0;
@@ -1113,6 +1510,95 @@ public:
         case WM_KEYUP:
             drv->OnKeyUp(hwnd, w, (int)wp);
             return 0;
+
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORLISTBOX:
+        case WM_CTLCOLORBTN: {
+            Win* child = WinOf((HWND)lp);
+            if (child) {
+                HDC dc = (HDC)wp;
+                if (child->styleText != CLR_INVALID)
+                    SetTextColor(dc, child->styleText);
+                if (child->styleBackground != CLR_INVALID) {
+                    SetBkColor(dc, child->styleBackground);
+                    SetBkMode(dc, OPAQUE);
+                    if (child->styleBrush)
+                        return (LRESULT)child->styleBrush.get();
+                }
+                else {
+                    SetBkMode(dc, TRANSPARENT);
+                    HWND parent = GetParent((HWND)lp);
+                    Win* pw = WinOf(parent);
+                    if (pw && pw->styleBrush)
+                        return (LRESULT)pw->styleBrush.get();
+                }
+            }
+            break;
+        }
+
+        case WM_DRAWITEM: {
+            auto* dis = (DRAWITEMSTRUCT*)lp;
+            Win* bw = WinOf(dis->hwndItem);
+            if (!bw) break;
+
+            bool pressed = (dis->itemState & ODS_SELECTED) != 0;
+            bool focused = (dis->itemState & ODS_FOCUS) != 0;
+
+            COLORREF bg = GetSysColor(COLOR_BTNFACE);
+            if (pressed) {
+                if (bw->stylePressed != CLR_INVALID) bg = bw->stylePressed;
+                else if (bw->styleBackground != CLR_INVALID) bg = bw->styleBackground;
+            }
+            else if (bw->isHot && bw->styleHot != CLR_INVALID) {
+                bg = bw->styleHot;
+            }
+            else if (bw->styleBackground != CLR_INVALID) {
+                bg = bw->styleBackground;
+            }
+
+            wil::unique_hbrush br(CreateSolidBrush(bg));
+            FillRect(dis->hDC, &dis->rcItem, br.get());
+
+            wchar_t buf[512];
+            GetWindowTextW(dis->hwndItem, buf, 512);
+            SetBkMode(dis->hDC, TRANSPARENT);
+            SetTextColor(dis->hDC,
+                bw->styleText != CLR_INVALID ? bw->styleText
+                : GetSysColor(COLOR_BTNTEXT));
+            DrawTextW(dis->hDC, buf, -1, &dis->rcItem,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+            if (focused) {
+                RECT r = dis->rcItem;
+                InflateRect(&r, -2, -2);
+                DrawFocusRect(dis->hDC, &r);
+            }
+            return TRUE;
+        }
+
+        case WM_MOUSEMOVE: {
+            if (w->kind == ControlKind::Button && !w->isHot) {
+                w->isHot = true;
+                InvalidateRect(hwnd, nullptr, TRUE);
+
+                TRACKMOUSEEVENT tme{};
+                tme.cbSize = sizeof(tme);
+                tme.dwFlags = TME_LEAVE;
+                tme.hwndTrack = hwnd;
+                TrackMouseEvent(&tme);
+            }
+            drv->OnMouseMove(hwnd, w, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+            return 0;
+        }
+
+        case WM_MOUSELEAVE: {
+            if (w->kind == ControlKind::Button && w->isHot) {
+                w->isHot = false;
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+        }
         }
 
         return DefWindowProcW(hwnd, msg, wp, lp);
@@ -1213,7 +1699,7 @@ public:
             break;
         case ControlKind::Button:
             cls = L"BUTTON";
-            style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON;
+            style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW;
             break;
         case ControlKind::CheckBox:
             cls = L"BUTTON";
@@ -1450,7 +1936,10 @@ public:
         if (!hwnd) return;
 
         LOGFONTW lf{};
-        lf.lfHeight = -MulDiv(size, GetDeviceCaps(GetDC(hwnd), LOGPIXELSY), 72);
+        HDC dc = GetDC(hwnd);
+        lf.lfHeight = -MulDiv(size, GetDeviceCaps(dc, LOGPIXELSY), 72);
+        ReleaseDC(hwnd, dc);
+
         lf.lfWeight = bold ? FW_BOLD : FW_NORMAL;
         lf.lfItalic = italic ? TRUE : FALSE;
         std::wstring wface = Utf8ToW(face);
@@ -1530,9 +2019,16 @@ public:
 
         RECT rc;
         GetClientRect(hwnd, &rc);
-        wil::unique_hbrush br(
-            CreateSolidBrush(GetSysColor(COLOR_BTNFACE)));
-        ::FillRect(dc, &rc, br.get());
+
+        if (w->styleBackground != CLR_INVALID) {
+            if (!w->styleBrush)
+                w->styleBrush.reset(CreateSolidBrush(w->styleBackground));
+            ::FillRect(dc, &rc, w->styleBrush.get());
+        }
+        else {
+            wil::unique_hbrush br(CreateSolidBrush(GetSysColor(COLOR_BTNFACE)));
+            ::FillRect(dc, &rc, br.get());
+        }
         return true;
     }
 
@@ -1572,11 +2068,19 @@ public:
     }
 
     void OnMouseDown(HWND, Win* w, int x, int y, int button) override {
+        if (w && w->kind == ControlKind::Button) {
+            w->isPressed = true;
+            InvalidateRect(w->hwnd.get(), nullptr, TRUE);
+        }
         Emit(w, OSEvent::MouseDown, [=](OSEvent& e) {
             e.x = x; e.y = y; e.button = button; });
     }
 
     void OnMouseUp(HWND, Win* w, int x, int y, int button) override {
+        if (w && w->kind == ControlKind::Button) {
+            w->isPressed = false;
+            InvalidateRect(w->hwnd.get(), nullptr, TRUE);
+        }
         Emit(w, OSEvent::MouseUp, [=](OSEvent& e) {
             e.x = x; e.y = y; e.button = button; });
     }
@@ -1592,6 +2096,90 @@ public:
 
     void OnKeyUp(HWND, Win* w, int vk) override {
         Emit(w, OSEvent::KeyUp, [=](OSEvent& e) { e.key = vk; });
+    }
+
+    void ApplyStyle(IOSHandle* h, const TStyle& s, ControlKind kind) override {
+        HWND hwnd = HwndOf(h);
+        if (!hwnd) return;
+
+        Win* w = static_cast<Win*>(h);
+
+        auto bg = [&](const char* role, COLORREF def) -> COLORREF {
+            auto c = s.GetColor(role);
+            return c.valid ? ToCOLORREF(c) : def;
+            };
+        auto fg = [&](const char* role, COLORREF def) -> COLORREF {
+            auto c = s.GetColor(role);
+            return c.valid ? ToCOLORREF(c) : def;
+            };
+        auto applyFont = [&](const char* role) {
+            auto f = s.GetFont(role);
+            if (f.valid)
+                SetFont(h, f.face, f.size, f.bold, f.italic);
+            };
+
+        switch (kind) {
+        case ControlKind::Form:
+        case ControlKind::Panel: {
+            w->styleBackground = bg(StyleRole::PanelBackground,
+                GetSysColor(COLOR_BTNFACE));
+            w->RefreshStyleBrushes();
+            applyFont(StyleRole::FontDefault);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            break;
+        }
+        case ControlKind::Label: {
+            w->styleText = fg(StyleRole::LabelText,
+                GetSysColor(COLOR_WINDOWTEXT));
+            w->styleBackground = bg(StyleRole::PanelBackground, CLR_INVALID);
+            w->RefreshStyleBrushes();
+            applyFont(StyleRole::FontLabel);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            break;
+        }
+        case ControlKind::Edit: {
+            w->styleText = fg(StyleRole::EditText,
+                GetSysColor(COLOR_WINDOWTEXT));
+            w->styleBackground = bg(StyleRole::EditBackground,
+                GetSysColor(COLOR_WINDOW));
+            w->RefreshStyleBrushes();
+            applyFont(StyleRole::FontDefault);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            break;
+        }
+        case ControlKind::Button: {
+            w->styleText = fg(StyleRole::ButtonText,
+                GetSysColor(COLOR_BTNTEXT));
+            w->styleBackground = bg(StyleRole::ButtonFace,
+                GetSysColor(COLOR_BTNFACE));
+            w->styleHot = bg(StyleRole::ButtonHot, w->styleBackground);
+            w->stylePressed = bg(StyleRole::ButtonPressed, w->styleBackground);
+            w->RefreshStyleBrushes();
+            applyFont(StyleRole::FontButton);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            break;
+        }
+        case ControlKind::CheckBox: {
+            w->styleText = fg(StyleRole::LabelText,
+                GetSysColor(COLOR_WINDOWTEXT));
+            w->styleBackground = bg(StyleRole::PanelBackground, CLR_INVALID);
+            w->RefreshStyleBrushes();
+            applyFont(StyleRole::FontLabel);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            break;
+        }
+        case ControlKind::ComboBox:
+        case ControlKind::ListBox: {
+            w->styleText = fg(StyleRole::ComboText,
+                GetSysColor(COLOR_WINDOWTEXT));
+            w->styleBackground = bg(StyleRole::ComboBackground,
+                GetSysColor(COLOR_WINDOW));
+            w->RefreshStyleBrushes();
+            applyFont(StyleRole::FontDefault);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            break;
+        }
+        }
     }
 };
 
@@ -1665,9 +2253,24 @@ public:
         exitBtn->SetBounds(180, 230, 150, 30);
         exitBtn->SetCaption("Exit");
 
+        auto* lightBtn = new TButton(this);
+        lightBtn->SetParent(this);
+        lightBtn->SetBounds(20, 275, 100, 28);
+        lightBtn->SetCaption("Light");
+
+        auto* darkBtn = new TButton(this);
+        darkBtn->SetParent(this);
+        darkBtn->SetBounds(130, 275, 100, 28);
+        darkBtn->SetCaption("Dark");
+
+        auto* classicBtn = new TButton(this);
+        classicBtn->SetParent(this);
+        classicBtn->SetBounds(240, 275, 100, 28);
+        classicBtn->SetCaption("Classic");
+
         auto* status = new TLabel(this);
         status->SetParent(this);
-        status->SetBounds(20, 275, 480, 24);
+        status->SetBounds(20, 320, 480, 24);
         status->SetCaption("Ready.");
 
         auto dirty = std::make_shared<bool>(false);
@@ -1692,8 +2295,7 @@ public:
             }
             std::string city = cityCombo->GetString(cityCombo->GetSelectedIndex());
             std::string who = politeChk->GetChecked() ? "Hello, " : "Hi, ";
-            std::string you = politeChk->GetChecked() ? "!" : "!";
-            greetLabel->SetCaption(who + name + you + "  (city: " + city + ")");
+            greetLabel->SetCaption(who + name + "!  (city: " + city + ")");
             *dirty = true;
             };
 
@@ -1719,6 +2321,10 @@ public:
             *dirty = false;
             };
 
+        exitBtn->OnClick() = [=](TObject*) {
+            PostMessageW(nullptr, WM_CLOSE, 0, 0);
+            };
+
         nameEdit->OnChange() = [=](TObject*) {
             *dirty = true;
             showStatus("Input");
@@ -1735,11 +2341,39 @@ public:
             updateGreeting();
             showStatus("City changed");
             };
+
+        // --- Лямбды переключения темы ---
+        lightBtn->OnClick() = [=](TObject*) {
+            if (auto* app = dynamic_cast<TApplication*>(GetOwner()))
+                app->SetStyle("Light");
+            status->SetCaption("Theme: Light");
+            };
+
+        darkBtn->OnClick() = [=](TObject*) {
+            if (auto* app = dynamic_cast<TApplication*>(GetOwner()))
+                app->SetStyle("Dark");
+            status->SetCaption("Theme: Dark");
+            };
+
+        classicBtn->OnClick() = [=](TObject*) {
+            if (auto* app = dynamic_cast<TApplication*>(GetOwner()))
+                app->SetStyle("Classic");
+            status->SetCaption("Theme: Classic");
+            };
     }
 
     void PaintTree(TCanvas* c) override {
         if (!c) return;
-        c->SetColor(TColor::FromRGB(0, 120, 215));
+        auto style = ResolveStyle();
+        TColor color;
+        if (style) {
+            auto accent = style->GetColor(StyleRole::Accent);
+            color = std::move(TColor::FromRGB(accent.r, accent.g, accent.b));
+        }
+        else {
+            color = std::move(TColor::FromRGB(0, 120, 215));
+        }
+        c->SetColor(color);
         c->Line(0, 50, 520, 50);
         inherited::PaintTree(c);
     }
@@ -1752,10 +2386,9 @@ public:
     }
 };
 
-// ============================================================================
-//  Глобальные объекты — как в IDE-сгенерированном коде VCL.
-// ============================================================================
-std::unique_ptr<TApplication> Application;
+std::unique_ptr<TStyleManager> gStyleManager;
+std::unique_ptr<IOSDriver>     gDriver;
+std::unique_ptr<TApplication>  Application;
 TForm1* Form1 = nullptr;
 
 // ============================================================================
@@ -1793,10 +2426,12 @@ int WINAPI _tWinMain(HINSTANCE, HINSTANCE, LPTSTR, int)
 // ============================================================================
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 {
-    TWindowsDriver driver(hInstance);
+    gStyleManager = std::make_unique<TStyleManager>();
+    gDriver = std::make_unique<TWindowsDriver>(hInstance);
     Application = std::make_unique<TApplication>(nullptr);
-    Application->SetDriver(&driver);
-    Application->SetTitle("VCL Demo");
+    Application->SetStyleManager(gStyleManager.get());
+    Application->SetDriver(gDriver.get());
+    Application->SetTitle("VCL Demo — Styled");
     Form1 = new TForm1(Application.get());
     return _tWinMain(hInstance, nullptr, nullptr, 0);
 }
