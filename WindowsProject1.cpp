@@ -162,88 +162,89 @@ namespace vcl {
     };
 
     // ---------------------------------------------------------------------------
-    //  Встроенные темы
+    //  Встроенные темы (возвращают значение)
     // ---------------------------------------------------------------------------
-    inline std::shared_ptr<TStyle> MakeLightStyle() {
-        auto s = std::make_shared<TStyle>("Light");
-        s->SetColor(StyleRole::FormBackground, TStyleColor::FromRGB(250, 250, 250));
-        s->SetColor(StyleRole::PanelBackground, TStyleColor::FromRGB(240, 244, 248));
-        s->SetColor(StyleRole::LabelText, TStyleColor::FromRGB(28, 28, 30));
-        s->SetColor(StyleRole::EditBackground, TStyleColor::FromRGB(255, 255, 255));
-        s->SetColor(StyleRole::EditText, TStyleColor::FromRGB(20, 20, 20));
-        s->SetColor(StyleRole::EditBorder, TStyleColor::FromRGB(200, 205, 210));
-        s->SetColor(StyleRole::ButtonFace, TStyleColor::FromRGB(238, 242, 247));
-        s->SetColor(StyleRole::ButtonText, TStyleColor::FromRGB(20, 20, 20));
-        s->SetColor(StyleRole::ButtonHot, TStyleColor::FromRGB(225, 235, 248));
-        s->SetColor(StyleRole::ButtonPressed, TStyleColor::FromRGB(210, 225, 245));
-        s->SetColor(StyleRole::ComboBackground, TStyleColor::FromRGB(255, 255, 255));
-        s->SetColor(StyleRole::ComboText, TStyleColor::FromRGB(20, 20, 20));
-        s->SetColor(StyleRole::Accent, TStyleColor::FromRGB(0, 120, 215));
-        s->SetColor(StyleRole::Divider, TStyleColor::FromRGB(210, 215, 220));
+    inline TStyle MakeLightStyle() {
+        TStyle s("Light");
+        s.SetColor(StyleRole::FormBackground, TStyleColor::FromRGB(250, 250, 250));
+        s.SetColor(StyleRole::PanelBackground, TStyleColor::FromRGB(240, 244, 248));
+        s.SetColor(StyleRole::LabelText, TStyleColor::FromRGB(28, 28, 30));
+        s.SetColor(StyleRole::EditBackground, TStyleColor::FromRGB(255, 255, 255));
+        s.SetColor(StyleRole::EditText, TStyleColor::FromRGB(20, 20, 20));
+        s.SetColor(StyleRole::EditBorder, TStyleColor::FromRGB(200, 205, 210));
+        s.SetColor(StyleRole::ButtonFace, TStyleColor::FromRGB(238, 242, 247));
+        s.SetColor(StyleRole::ButtonText, TStyleColor::FromRGB(20, 20, 20));
+        s.SetColor(StyleRole::ButtonHot, TStyleColor::FromRGB(225, 235, 248));
+        s.SetColor(StyleRole::ButtonPressed, TStyleColor::FromRGB(210, 225, 245));
+        s.SetColor(StyleRole::ComboBackground, TStyleColor::FromRGB(255, 255, 255));
+        s.SetColor(StyleRole::ComboText, TStyleColor::FromRGB(20, 20, 20));
+        s.SetColor(StyleRole::Accent, TStyleColor::FromRGB(0, 120, 215));
+        s.SetColor(StyleRole::Divider, TStyleColor::FromRGB(210, 215, 220));
 
-        s->SetFont(StyleRole::FontDefault, TStyleFont{ "Segoe UI",  9, false, false, true });
-        s->SetFont(StyleRole::FontLabel, TStyleFont{ "Segoe UI",  9, false, false, true });
-        s->SetFont(StyleRole::FontButton, TStyleFont{ "Segoe UI",  9, false, false, true });
-        s->SetFont(StyleRole::FontTitle, TStyleFont{ "Segoe UI", 12, true,  false, true });
+        s.SetFont(StyleRole::FontDefault, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s.SetFont(StyleRole::FontLabel, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s.SetFont(StyleRole::FontButton, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s.SetFont(StyleRole::FontTitle, TStyleFont{ "Segoe UI", 12, true,  false, true });
 
-        s->SetMetrics(StyleRole::MetricsControl, TStyleMetrics{ 1, 0, 4, 26, true });
+        s.SetMetrics(StyleRole::MetricsControl, TStyleMetrics{ 1, 0, 4, 26, true });
         return s;
     }
 
-    inline std::shared_ptr<TStyle> MakeDarkStyle() {
-        auto s = std::make_shared<TStyle>("Dark");
-        s->SetColor(StyleRole::FormBackground, TStyleColor::FromRGB(32, 34, 38));
-        s->SetColor(StyleRole::PanelBackground, TStyleColor::FromRGB(42, 46, 52));
-        s->SetColor(StyleRole::LabelText, TStyleColor::FromRGB(230, 232, 236));
-        s->SetColor(StyleRole::EditBackground, TStyleColor::FromRGB(52, 56, 62));
-        s->SetColor(StyleRole::EditText, TStyleColor::FromRGB(235, 238, 242));
-        s->SetColor(StyleRole::EditBorder, TStyleColor::FromRGB(90, 96, 104));
-        s->SetColor(StyleRole::ButtonFace, TStyleColor::FromRGB(60, 66, 74));
-        s->SetColor(StyleRole::ButtonText, TStyleColor::FromRGB(235, 238, 242));
-        s->SetColor(StyleRole::ButtonHot, TStyleColor::FromRGB(74, 84, 96));
-        s->SetColor(StyleRole::ButtonPressed, TStyleColor::FromRGB(46, 54, 64));
-        s->SetColor(StyleRole::ComboBackground, TStyleColor::FromRGB(52, 56, 62));
-        s->SetColor(StyleRole::ComboText, TStyleColor::FromRGB(235, 238, 242));
-        s->SetColor(StyleRole::Accent, TStyleColor::FromRGB(90, 170, 255));
-        s->SetColor(StyleRole::Divider, TStyleColor::FromRGB(80, 86, 94));
+    inline TStyle MakeDarkStyle() {
+        TStyle s("Dark");
+        s.SetColor(StyleRole::FormBackground, TStyleColor::FromRGB(32, 34, 38));
+        s.SetColor(StyleRole::PanelBackground, TStyleColor::FromRGB(42, 46, 52));
+        s.SetColor(StyleRole::LabelText, TStyleColor::FromRGB(230, 232, 236));
+        s.SetColor(StyleRole::EditBackground, TStyleColor::FromRGB(52, 56, 62));
+        s.SetColor(StyleRole::EditText, TStyleColor::FromRGB(235, 238, 242));
+        s.SetColor(StyleRole::EditBorder, TStyleColor::FromRGB(90, 96, 104));
+        s.SetColor(StyleRole::ButtonFace, TStyleColor::FromRGB(60, 66, 74));
+        s.SetColor(StyleRole::ButtonText, TStyleColor::FromRGB(235, 238, 242));
+        s.SetColor(StyleRole::ButtonHot, TStyleColor::FromRGB(74, 84, 96));
+        s.SetColor(StyleRole::ButtonPressed, TStyleColor::FromRGB(46, 54, 64));
+        s.SetColor(StyleRole::ComboBackground, TStyleColor::FromRGB(52, 56, 62));
+        s.SetColor(StyleRole::ComboText, TStyleColor::FromRGB(235, 238, 242));
+        s.SetColor(StyleRole::Accent, TStyleColor::FromRGB(90, 170, 255));
+        s.SetColor(StyleRole::Divider, TStyleColor::FromRGB(80, 86, 94));
 
-        s->SetFont(StyleRole::FontDefault, TStyleFont{ "Segoe UI",  9, false, false, true });
-        s->SetFont(StyleRole::FontLabel, TStyleFont{ "Segoe UI",  9, false, false, true });
-        s->SetFont(StyleRole::FontButton, TStyleFont{ "Segoe UI",  9, false, false, true });
-        s->SetFont(StyleRole::FontTitle, TStyleFont{ "Segoe UI", 12, true,  false, true });
+        s.SetFont(StyleRole::FontDefault, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s.SetFont(StyleRole::FontLabel, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s.SetFont(StyleRole::FontButton, TStyleFont{ "Segoe UI",  9, false, false, true });
+        s.SetFont(StyleRole::FontTitle, TStyleFont{ "Segoe UI", 12, true,  false, true });
 
-        s->SetMetrics(StyleRole::MetricsControl, TStyleMetrics{ 1, 0, 4, 26, true });
+        s.SetMetrics(StyleRole::MetricsControl, TStyleMetrics{ 1, 0, 4, 26, true });
         return s;
     }
 
-    inline std::shared_ptr<TStyle> MakeClassicStyle() {
-        auto s = std::make_shared<TStyle>("Classic");
-        s->SetColor(StyleRole::FormBackground, TStyleColor::FromRGB(212, 208, 200));
-        s->SetColor(StyleRole::PanelBackground, TStyleColor::FromRGB(212, 208, 200));
-        s->SetColor(StyleRole::LabelText, TStyleColor::FromRGB(0, 0, 0));
-        s->SetColor(StyleRole::EditBackground, TStyleColor::FromRGB(255, 255, 255));
-        s->SetColor(StyleRole::EditText, TStyleColor::FromRGB(0, 0, 0));
-        s->SetColor(StyleRole::EditBorder, TStyleColor::FromRGB(128, 128, 128));
-        s->SetColor(StyleRole::ButtonFace, TStyleColor::FromRGB(212, 208, 200));
-        s->SetColor(StyleRole::ButtonText, TStyleColor::FromRGB(0, 0, 0));
-        s->SetColor(StyleRole::ButtonHot, TStyleColor::FromRGB(228, 224, 216));
-        s->SetColor(StyleRole::ButtonPressed, TStyleColor::FromRGB(192, 188, 180));
-        s->SetColor(StyleRole::ComboBackground, TStyleColor::FromRGB(255, 255, 255));
-        s->SetColor(StyleRole::ComboText, TStyleColor::FromRGB(0, 0, 0));
-        s->SetColor(StyleRole::Accent, TStyleColor::FromRGB(10, 36, 106));
-        s->SetColor(StyleRole::Divider, TStyleColor::FromRGB(128, 128, 128));
+    inline TStyle MakeClassicStyle() {
+        TStyle s("Classic");
+        s.SetColor(StyleRole::FormBackground, TStyleColor::FromRGB(212, 208, 200));
+        s.SetColor(StyleRole::PanelBackground, TStyleColor::FromRGB(212, 208, 200));
+        s.SetColor(StyleRole::LabelText, TStyleColor::FromRGB(0, 0, 0));
+        s.SetColor(StyleRole::EditBackground, TStyleColor::FromRGB(255, 255, 255));
+        s.SetColor(StyleRole::EditText, TStyleColor::FromRGB(0, 0, 0));
+        s.SetColor(StyleRole::EditBorder, TStyleColor::FromRGB(128, 128, 128));
+        s.SetColor(StyleRole::ButtonFace, TStyleColor::FromRGB(212, 208, 200));
+        s.SetColor(StyleRole::ButtonText, TStyleColor::FromRGB(0, 0, 0));
+        s.SetColor(StyleRole::ButtonHot, TStyleColor::FromRGB(228, 224, 216));
+        s.SetColor(StyleRole::ButtonPressed, TStyleColor::FromRGB(192, 188, 180));
+        s.SetColor(StyleRole::ComboBackground, TStyleColor::FromRGB(255, 255, 255));
+        s.SetColor(StyleRole::ComboText, TStyleColor::FromRGB(0, 0, 0));
+        s.SetColor(StyleRole::Accent, TStyleColor::FromRGB(10, 36, 106));
+        s.SetColor(StyleRole::Divider, TStyleColor::FromRGB(128, 128, 128));
 
-        s->SetFont(StyleRole::FontDefault, TStyleFont{ "MS Sans Serif",  8, false, false, true });
-        s->SetFont(StyleRole::FontLabel, TStyleFont{ "MS Sans Serif",  8, false, false, true });
-        s->SetFont(StyleRole::FontButton, TStyleFont{ "MS Sans Serif",  8, false, false, true });
-        s->SetFont(StyleRole::FontTitle, TStyleFont{ "MS Sans Serif", 10, true,  false, true });
+        s.SetFont(StyleRole::FontDefault, TStyleFont{ "MS Sans Serif",  8, false, false, true });
+        s.SetFont(StyleRole::FontLabel, TStyleFont{ "MS Sans Serif",  8, false, false, true });
+        s.SetFont(StyleRole::FontButton, TStyleFont{ "MS Sans Serif",  8, false, false, true });
+        s.SetFont(StyleRole::FontTitle, TStyleFont{ "MS Sans Serif", 10, true,  false, true });
 
-        s->SetMetrics(StyleRole::MetricsControl, TStyleMetrics{ 1, 0, 2, 24, true });
+        s.SetMetrics(StyleRole::MetricsControl, TStyleMetrics{ 1, 0, 2, 24, true });
         return s;
     }
 
     // ---------------------------------------------------------------------------
     //  TStyleManager
+    //  Стили хранятся по значению. Активный стиль — это имя в карте.
     // ---------------------------------------------------------------------------
     class TStyleManager {
     public:
@@ -255,15 +256,14 @@ namespace vcl {
         TStyleManager(const TStyleManager&) = delete;
         TStyleManager& operator=(const TStyleManager&) = delete;
 
-        void RegisterStyle(const std::string& name, std::shared_ptr<TStyle> s) {
-            if (!s) return;
-            s->SetName(name);
+        void RegisterStyle(const std::string& name, TStyle s) {
+            s.SetName(name);
             FStyles[name] = std::move(s);
         }
 
-        std::shared_ptr<TStyle> GetStyle(const std::string& name) const {
+        const TStyle* GetStyle(const std::string& name) const {
             auto it = FStyles.find(name);
-            return it == FStyles.end() ? nullptr : it->second;
+            return it == FStyles.end() ? nullptr : &it->second;
         }
 
         std::vector<std::string> GetStyleNames() const {
@@ -274,14 +274,12 @@ namespace vcl {
         }
 
         void SetActiveStyle(const std::string& name) {
-            auto s = GetStyle(name);
-            if (!s) return;
+            if (!GetStyle(name)) return;
             FActiveName = name;
-            FActive = s;
             NotifyChange();
         }
 
-        std::shared_ptr<TStyle> GetActiveStyle() const { return FActive; }
+        const TStyle* GetActiveStyle() const { return GetStyle(FActiveName); }
         const std::string& GetActiveStyleName() const { return FActiveName; }
 
         std::size_t Subscribe(TStyleChangeEvent e) {
@@ -292,32 +290,26 @@ namespace vcl {
         void Unsubscribe(std::size_t id) { FSubs.erase(id); }
 
         void NotifyChange() {
-            if (!FActive) return;
-
-            std::shared_ptr<TStyle> active = FActive;
-
-            std::vector<TStyleChangeEvent> snapshot;
-            snapshot.reserve(FSubs.size());
-            for (auto& kv : FSubs)
-                snapshot.push_back(kv.second);
-
-            for (auto& fn : snapshot)
+            const TStyle* active = GetActiveStyle();
+            if (!active) return;
+            for (auto& kv : FSubs) {
+                const auto& fn = kv.second;
                 if (fn) fn(*active);
+            }
         }
 
         void InstallBuiltins() {
             RegisterStyle("Light", MakeLightStyle());
             RegisterStyle("Dark", MakeDarkStyle());
             RegisterStyle("Classic", MakeClassicStyle());
-            if (!FActive) SetActiveStyle("Light");
+            if (FActiveName.empty()) FActiveName = "Light";
         }
 
     private:
-        std::map<std::string, std::shared_ptr<TStyle>> FStyles;
-        std::map<std::size_t, TStyleChangeEvent>       FSubs;
-        std::size_t        FNextSubId = 1;
-        std::string        FActiveName;
-        std::shared_ptr<TStyle> FActive;
+        std::map<std::string, TStyle>            FStyles;
+        std::map<std::size_t, TStyleChangeEvent> FSubs;
+        std::size_t FNextSubId = 1;
+        std::string FActiveName;
     };
 
     // ============================================================================
@@ -759,10 +751,9 @@ namespace vcl {
         }
         TStyleManager* GetStyleManager() const { return FStyleManager; }
 
-        std::shared_ptr<TStyle> ResolveStyle() const {
+        const TStyle* ResolveStyle() const {
             if (!FStyleName.empty() && FStyleManager) {
-                auto s = FStyleManager->GetStyle(FStyleName);
-                if (s) return s;
+                if (auto* s = FStyleManager->GetStyle(FStyleName)) return s;
             }
             if (FParent) return FParent->ResolveStyle();
             if (FStyleManager) return FStyleManager->GetActiveStyle();
@@ -830,33 +821,14 @@ namespace vcl {
         TNotifyEvent FOnChange;
         TCloseEvent  FOnClose;
         TKeyEvent    FOnKeyDown;
-        std::size_t FStyleSubId = 0;
     public:
         explicit TOSControl(TComponent* owner) : TControl(owner) {}
 
-        ~TOSControl() override {
-            if (FStyleSubId && FStyleManager) {
-                FStyleManager->Unsubscribe(FStyleSubId);
-                FStyleSubId = 0;
-            }
-            FStyleManager = nullptr;
-        }
+        ~TOSControl() override = default;
 
         void SetStyleManager(TStyleManager* m) override {
             if (FStyleManager == m) return;
-
-            if (FStyleSubId && FStyleManager) {
-                FStyleManager->Unsubscribe(FStyleSubId);
-                FStyleSubId = 0;
-            }
-
             FStyleManager = m;
-
-            if (FStyleManager) {
-                FStyleSubId = FStyleManager->Subscribe(
-                    [this](const TStyle&) { ApplyStyleRecursive(); });
-            }
-
             for (auto* c : FChildControls)
                 c->SetStyleManager(m);
         }
@@ -965,7 +937,7 @@ namespace vcl {
 
         void ApplyStyleToHandle() {
             if (!FHandle || !FDriver) return;
-            auto style = ResolveStyle();
+            auto* style = ResolveStyle();
             if (!style) return;
             FDriver->ApplyStyle(FHandle.get(), *style, GetKind());
         }
@@ -1206,12 +1178,17 @@ namespace vcl {
         TStyleManager* FStyleManager = nullptr;
         TForm* FMainForm = nullptr;
         std::string FTitle;
+        std::size_t FStyleSubId = 0;
     public:
         bool MainFormOnTaskBar = false;
 
         TApplication(TComponent* owner) : TComponent(owner) {}
 
-        ~TApplication() override = default;
+        ~TApplication() override {
+            if (FStyleSubId && FStyleManager) {
+                FStyleManager->Unsubscribe(FStyleSubId);
+            }
+        }
 
         // --- Стили (невладеющий указатель) ---
         void SetStyleManager(TStyleManager* m) { FStyleManager = m; }
@@ -1224,13 +1201,20 @@ namespace vcl {
             return FStyleManager ? FStyleManager->GetActiveStyleName()
                 : std::string{};
         }
-        void RegisterStyle(std::shared_ptr<TStyle> s) {
-            if (!s || !FStyleManager) return;
-            FStyleManager->RegisterStyle(s->GetName(), std::move(s));
+        void RegisterStyle(TStyle s) {
+            if (!FStyleManager) return;
+            FStyleManager->RegisterStyle(s.GetName(), std::move(s));
         }
 
         virtual void Initialize() {
             if (FStyleManager) FStyleManager->InstallBuiltins();
+
+            if (FStyleManager && !FStyleSubId) {
+                FStyleSubId = FStyleManager->Subscribe(
+                    [this](const TStyle&) {
+                        if (FMainForm) FMainForm->ApplyStyleRecursive();
+                    });
+            }
         }
 
         // --- Драйвер ---
@@ -2364,7 +2348,7 @@ public:
 
     void PaintTree(TCanvas* c) override {
         if (!c) return;
-        auto style = ResolveStyle();
+        auto* style = ResolveStyle();
         TColor color;
         if (style) {
             auto accent = style->GetColor(StyleRole::Accent);
