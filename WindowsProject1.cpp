@@ -86,13 +86,13 @@ namespace vcl {
         Exception(const Exception&) = delete;
         Exception& operator=(const Exception&) = delete;
 
-        const std::string& Message() const { return FMessage; }
+        const std::string& GetMessage() const { return FMessage; }
         void SetMessage(const std::string& m) { FMessage = m; }
 
-        int  HelpContext() const { return FHelpContext; }
+        int  GetHelpContext() const { return FHelpContext; }
         void SetHelpContext(int h) { FHelpContext = h; }
 
-        const Exception* InnerException() const { return FInnerException.get(); }
+        const Exception* GetInnerException() const { return FInnerException.get(); }
 
         Exception* GetBaseException() {
             Exception* e = this;
@@ -104,7 +104,7 @@ namespace vcl {
             return const_cast<Exception*>(this)->GetBaseException();
         }
 
-        const std::string& StackTrace() const { return FStackTrace; }
+        const std::string& GetStackTrace() const { return FStackTrace; }
         void SetStackTrace(const std::string& s) { FStackTrace = s; }
 
         virtual const char* ClassName() const { return "Exception"; }
@@ -116,7 +116,7 @@ namespace vcl {
             const Exception* inner = FInnerException.get();
             while (inner) {
                 os << "\n  caused by " << inner->ClassName()
-                    << ": " << inner->Message();
+                    << ": " << inner->GetMessage();
                 inner = inner->FInnerException.get();
             }
             return os.str();
@@ -185,9 +185,9 @@ namespace vcl {
         TComponent(const TComponent&) = delete;
         TComponent& operator=(const TComponent&) = delete;
 
-        TComponent* Owner() const { return FOwner; }
+        TComponent* GetOwner() const { return FOwner; }
 
-        const std::string& Name() const { return FName; }
+        const std::string& GetName() const { return FName; }
         void SetName(const std::string& n) { FName = n; }
 
         TComponent* FindComponent(const std::string& name) {
@@ -198,7 +198,7 @@ namespace vcl {
             return nullptr;
         }
 
-        std::size_t OwnedCount() const { return FOwnedComponents.size(); }
+        std::size_t GetOwnedCount() const { return FOwnedComponents.size(); }
 
         const char* ClassName() const override { return "TComponent"; }
         bool InheritsFrom(const char* cls) const override {
@@ -309,7 +309,7 @@ namespace vcl {
         virtual std::unique_ptr<TCanvas>
             CreateCanvas(IOSHandle* h) = 0;
 
-        virtual const char* Name() const = 0;
+        virtual const char* GetName() const = 0;
         virtual int  RunMessageLoop() = 0;
 
         virtual void SetBounds(IOSHandle* h, int l, int t, int w, int ht) = 0;
@@ -419,10 +419,10 @@ namespace vcl {
 
         ~TControl() override = default;
 
-        int Left()   const { return FLeft; }
-        int Top()    const { return FTop; }
-        int Width()  const { return FWidth; }
-        int Height() const { return FHeight; }
+        int GetLeft()   const { return FLeft; }
+        int GetTop()    const { return FTop; }
+        int GetWidth()  const { return FWidth; }
+        int GetHeight() const { return FHeight; }
 
         virtual void SetBounds(int l, int t, int w, int h) {
             FLeft = l; FTop = t;
@@ -445,13 +445,13 @@ namespace vcl {
             OnVisibleChanged();
         }
 
-        bool Enabled() const { return FEnabled; }
+        bool GetEnabled() const { return FEnabled; }
         virtual void SetEnabled(bool e) { FEnabled = e; }
 
-        const std::string& Caption() const { return FCaption; }
+        const std::string& GetCaption() const { return FCaption; }
         virtual void SetCaption(const std::string& c) { FCaption = c; }
 
-        TControl* Parent() const { return FParent; }
+        TControl* GetParent() const { return FParent; }
 
         TNotifyEvent& OnResize() { return FOnResize; }
         TNotifyEvent& OnClick() { return FOnClick; }
@@ -554,17 +554,17 @@ namespace vcl {
         TOSControl(const TOSControl&) = delete;
         TOSControl& operator=(const TOSControl&) = delete;
 
-        virtual ControlKind Kind() const { return ControlKind::Panel; }
+        virtual ControlKind GetKind() const { return ControlKind::Panel; }
 
         void SetDriver(IOSDriver* d) { FDriver = d; }
-        IOSDriver* Driver() const { return FDriver; }
+        IOSDriver* GetDriver() const { return FDriver; }
 
         virtual void CreateHandle(IOSHandle* parentHandle) {
             if (FHandle) return;
             if (!FDriver) return;
 
             ControlDesc d;
-            d.kind = Kind();
+            d.kind = GetKind();
             d.caption = FCaption;
             d.x = FLeft; d.y = FTop; d.w = FWidth; d.h = FHeight;
             d.visible = IsVisible();
@@ -704,7 +704,7 @@ namespace vcl {
         explicit TForm(TComponent* owner) : TCustomForm(owner) {}
         ~TForm() override = default;
 
-        ControlKind Kind() const override { return ControlKind::Form; }
+        ControlKind GetKind() const override { return ControlKind::Form; }
 
         void CreateHandle() {
             inherited::CreateHandle(nullptr);
@@ -729,7 +729,7 @@ namespace vcl {
         explicit TLabel(TComponent* owner) : TOSControl(owner) {}
         ~TLabel() override = default;
 
-        ControlKind Kind() const override { return ControlKind::Label; }
+        ControlKind GetKind() const override { return ControlKind::Label; }
         const char* ClassName() const override { return "TLabel"; }
         bool InheritsFrom(const char* cls) const override {
             return std::string(cls) == "TLabel" || inherited::InheritsFrom(cls);
@@ -742,7 +742,7 @@ namespace vcl {
         explicit TButton(TComponent* owner) : TOSControl(owner) {}
         ~TButton() override = default;
 
-        ControlKind Kind() const override { return ControlKind::Button; }
+        ControlKind GetKind() const override { return ControlKind::Button; }
         const char* ClassName() const override { return "TButton"; }
         bool InheritsFrom(const char* cls) const override {
             return std::string(cls) == "TButton" || inherited::InheritsFrom(cls);
@@ -751,19 +751,19 @@ namespace vcl {
 
     class TCheckBox : public TOSControl {
         INHERITED(TOSControl);
-        bool IsCheked = false;
+        bool IsChecked = false;
     public:
         explicit TCheckBox(TComponent* owner) : TOSControl(owner) {}
         ~TCheckBox() override = default;
 
-        ControlKind Kind() const override { return ControlKind::CheckBox; }
+        ControlKind GetKind() const override { return ControlKind::CheckBox; }
 
         void SetChecked(bool c) {
-            IsCheked = c;
-            if (FHandle) FDriver->SetCheck(FHandle.get(), IsCheked);
+            IsChecked = c;
+            if (FHandle) FDriver->SetCheck(FHandle.get(), IsChecked);
         }
-        bool GetCheck() const {
-            return FHandle ? FDriver->GetCheck(FHandle.get()) : IsCheked;
+        bool GetChecked() const {
+            return FHandle ? FDriver->GetCheck(FHandle.get()) : IsChecked;
         }
 
         const char* ClassName() const override { return "TCheckBox"; }
@@ -779,9 +779,9 @@ namespace vcl {
         explicit TEdit(TComponent* owner) : TOSControl(owner) {}
         ~TEdit() override = default;
 
-        ControlKind Kind() const override { return ControlKind::Edit; }
+        ControlKind GetKind() const override { return ControlKind::Edit; }
 
-        std::string Text() const {
+        std::string GetText() const {
             return FHandle ? FDriver->GetText(FHandle.get()) : FText;
         }
 
@@ -808,13 +808,13 @@ namespace vcl {
         explicit TComboBox(TComponent* owner) : TOSControl(owner) {}
         ~TComboBox() override = default;
 
-        ControlKind Kind() const override { return ControlKind::ComboBox; }
+        ControlKind GetKind() const override { return ControlKind::ComboBox; }
 
         void AddItem(const std::string& s) {
             if (FHandle) FDriver->AddString(FHandle.get(), s);
             else FPending.push_back(s);
         }
-        int  SelectedIndex() const {
+        int  GetSelectedIndex() const {
             return FHandle ? FDriver->GetSel(FHandle.get()) : -1;
         }
         void SetSelectedIndex(int i) {
@@ -844,7 +844,7 @@ namespace vcl {
         explicit TPanel(TComponent* owner) : TOSControl(owner) {}
         ~TPanel() override = default;
 
-        ControlKind Kind() const override { return ControlKind::Panel; }
+        ControlKind GetKind() const override { return ControlKind::Panel; }
 
         const char* ClassName() const override { return "TPanel"; }
         bool InheritsFrom(const char* cls) const override {
@@ -871,13 +871,13 @@ namespace vcl {
         ~TApplication() override = default;
 
         void SetDriver(IOSDriver* d) { FDriver = d; }
-        IOSDriver* Driver() const { return FDriver; }
+        IOSDriver* GetDriver() const { return FDriver; }
 
-        const std::string& Title() const { return FTitle; }
+        const std::string& GetTitle() const { return FTitle; }
         void SetTitle(const std::string& t) { FTitle = t; }
 
         void CreateForm(TForm* f) { FMainForm = f; }
-        TForm* MainForm() const { return FMainForm; }
+        TForm* GetMainForm() const { return FMainForm; }
 
         // Показ исключения — в стиле VCL ShowException.
         void ShowException(Exception* e) {
@@ -1185,7 +1185,7 @@ public:
     TWindowsDriver(const TWindowsDriver&) = delete;
     TWindowsDriver& operator=(const TWindowsDriver&) = delete;
 
-    const char* Name() const override { return "Windows"; }
+    const char* GetName() const override { return "Windows"; }
 
     void Init() override {}
     void Shutdown() override {}
@@ -1685,24 +1685,24 @@ public:
             };
 
         auto updateGreeting = [=]() {
-            std::string name = nameEdit->Text();
+            std::string name = nameEdit->GetText();
             if (name.empty()) {
                 greetLabel->SetCaption("Enter your name and click \"Greet\".");
                 return;
             }
-            std::string city = cityCombo->GetString(cityCombo->SelectedIndex());
-            std::string who = politeChk->GetCheck() ? "Hello, " : "Hi, ";
-            std::string you = politeChk->GetCheck() ? "!" : "!";
+            std::string city = cityCombo->GetString(cityCombo->GetSelectedIndex());
+            std::string who = politeChk->GetChecked() ? "Hello, " : "Hi, ";
+            std::string you = politeChk->GetChecked() ? "!" : "!";
             greetLabel->SetCaption(who + name + you + "  (city: " + city + ")");
             *dirty = true;
             };
 
         auto showStatus = [=](const std::string& prefix) {
-            std::string name = nameEdit->Text();
+            std::string name = nameEdit->GetText();
             status->SetCaption(prefix
                 + " | name: \"" + (name.empty() ? std::string("<empty>") : name)
-                + "\" | city: " + cityCombo->GetString(cityCombo->SelectedIndex())
-                + " | polite: " + (politeChk->GetCheck() ? "yes" : "no"));
+                + "\" | city: " + cityCombo->GetString(cityCombo->GetSelectedIndex())
+                + " | polite: " + (politeChk->GetChecked() ? "yes" : "no"));
             };
 
         greetBtn->OnClick() = [=](TObject*) {
